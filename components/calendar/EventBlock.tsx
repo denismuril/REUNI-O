@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { CalendarEvent, BUSINESS_HOURS, formatTime } from "@/types/booking";
+import { CalendarEvent, BUSINESS_HOURS } from "@/types/booking";
+import { formatTime } from "@/lib/utils";
 import {
     Tooltip,
     TooltipContent,
@@ -73,14 +74,17 @@ export function EventBlock({ event, slotHeight = 40, onClick }: EventBlockProps)
                     >
                         <div className="font-semibold truncate">{event.title}</div>
                         {height > 40 && (
-                            <div className="text-white/80 truncate">
-                                {formatTime(event.startTime)} - {formatTime(event.endTime)}
-                            </div>
-                        )}
-                        {height > 60 && (
-                            <div className="text-white/70 truncate text-[10px]">
-                                {event.roomName}
-                            </div>
+                            <>
+                                <div className="text-xs opacity-90">
+                                    {formatTime(event.startTime)} - {formatTime(event.endTime)}
+                                </div>
+                                {event.creatorName && (
+                                    <div className="text-xs font-medium truncate opacity-95 mt-0.5">
+                                        {event.creatorName}
+                                    </div>
+                                )}
+                                <div className="text-xs opacity-75 truncate">{event.roomName}</div>
+                            </>
                         )}
                     </div>
                 </TooltipTrigger>

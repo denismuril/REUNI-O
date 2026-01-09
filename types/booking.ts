@@ -56,6 +56,7 @@ export interface CalendarEvent {
     userId: string;
     userName: string;
     userEmail: string;
+    creatorName?: string | null;
     isRecurring: boolean;
     status: 'confirmed' | 'cancelled' | 'pending';
     position?: EventBlockPosition;
@@ -72,6 +73,7 @@ export interface BookingFormData {
     roomId: string;
     title: string;
     description?: string;
+    creatorName: string;
     date: Date;
     startTime: string; // "HH:mm" format
     endTime: string; // "HH:mm" format

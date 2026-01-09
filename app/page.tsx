@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { format, startOfWeek, endOfWeek, addDays } from "date-fns";
+import { format, startOfWeek, endOfWeek, subDays, addDays, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Plus, Calendar, Building2, DoorOpen, LogOut, User } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Users, Building2, DoorOpen, Plus, ChevronLeft, ChevronRight, Filter, Search } from "lucide-react";
+import Image from "next/image";
 
-import { WeeklyView, DailyView } from "@/components/calendar";
-import { BookingForm } from "@/components/forms";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Card, CardContent } from "@/components/ui/card";
 import {
     Select,
     SelectContent,
@@ -15,13 +17,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
     Popover,
     PopoverContent,
@@ -29,9 +26,66 @@ import {
 } from "@/components/ui/popover";
 
 import { createClient } from "@/lib/supabase/client";
-import { Branch, Room, BookingDetails } from "@/types/supabase";
-import { CalendarEvent, CalendarViewType } from "@/types/booking";
-import { cn } from "@/lib/utils";
+import { Database } from "@/types/supabase";
+import { BookingForm } from "@/components/forms/BookingForm";
+import { DailyView } from "@/components/calendar/DailyView";
+import { WeeklyView } from "@/components/calendar/WeeklyView";
+import { confirmCancellation, requestCancellation } from "./actions/cancel-booking";
+
+type Branch = Database["public"]["Tables"]["branches"]["Row"];
+type Room = Database["public"]["Tables"]["rooms"]["Row"];
+type CalendarEvent = {
+    id: string;
+    title: string;
+    description: string | null;
+    startTime: Date;
+    endTime: Date;
+    roomId: string;
+    roomName: string;
+    userId: string | null;
+    userName: string;
+    userEmail: string;
+    creatorName: string | null;
+    isRecurring: boolean;
+    status: "confirmed" | "cancelled" | "pending";
+};
+
+type CalendarViewType = "daily" | "weekly";
+function DailyEventList({ events, currentDate }: { events: CalendarEvent[]; currentDate: Date }) {
+    const dailyEvents = events.filter(e => isSameDay(e.startTime, currentDate));
+
+    if (dailyEvents.length === 0) {
+        return <div className="text-sm text-muted-foreground italic p-2 text-center border border-dashed rounded-md">Nenhuma reunião para este dia.</div>;
+    }
+
+    return (
+        <div className="space-y-2 mt-2 max-h-[300px] overflow-y-auto pr-1">
+            {dailyEvents.map(event => (
+                <div key={event.id} className="text-sm border-l-4 border-primary pl-3 py-2 bg-accent/20 rounded-r-md hover:bg-accent/40 transition-colors">
+                    <div className="font-semibold truncate text-foreground">{event.title}</div>
+                    <div className="flex justify-between items-center mt-1">
+                        <span className="text-xs font-mono bg-background px-1 rounded border">
+                            {format(event.startTime, "HH:mm")} - {format(event.endTime, "HH:mm")}
+                        </span>
+                    </div>
+
+                    <div className="flex flex-col mt-1.5 gap-0.5">
+                        <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <DoorOpen className="h-3 w-3" />
+                            <span className="truncate">{event.roomName}</span>
+                        </div>
+                        {event.creatorName && (
+                            <div className="text-xs text-primary font-medium flex items-center gap-1">
+                                <span className="opacity-70">Resp:</span>
+                                <span className="truncate">{event.creatorName}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
 
 export default function HomePage() {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -39,35 +93,24 @@ export default function HomePage() {
     const [branches, setBranches] = useState<Branch[]>([]);
     const [rooms, setRooms] = useState<Room[]>([]);
     const [selectedBranch, setSelectedBranch] = useState<string>("");
-    const [selectedRoom, setSelectedRoom] = useState<string>("");
+    const [selectedRoom, setSelectedRoom] = useState<string>("all");
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isBranchesLoaded, setIsBranchesLoaded] = useState(false);
+    const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
     const [showBookingForm, setShowBookingForm] = useState(false);
     const [initialBookingDate, setInitialBookingDate] = useState<Date>();
     const [initialBookingTime, setInitialBookingTime] = useState<string>();
-    const [user, setUser] = useState<{ email: string; name: string } | null>(null);
+
+    // Estados Cancelamento
+    const [isCancelling, setIsCancelling] = useState(false);
+    const [cancelStep, setCancelStep] = useState<"email" | "otp">("email");
+    const [cancelEmail, setCancelEmail] = useState("");
+    const [cancelToken, setCancelToken] = useState("");
+    const [cancelError, setCancelError] = useState("");
+    const [isProcessingCancel, setIsProcessingCancel] = useState(false);
 
     const supabase = createClient();
-
-    // Carrega usuário atual
-    useEffect(() => {
-        async function fetchUser() {
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser) {
-                const { data: profile } = await supabase
-                    .from("profiles")
-                    .select("full_name")
-                    .eq("id", authUser.id)
-                    .single();
-
-                setUser({
-                    email: authUser.email || "",
-                    name: profile?.full_name || authUser.email || "Usuário",
-                });
-            }
-        }
-        fetchUser();
-    }, []);
 
     // Carrega filiais
     useEffect(() => {
@@ -83,6 +126,7 @@ export default function HomePage() {
                 if (data.length > 0 && !selectedBranch) {
                     setSelectedBranch(data[0].id);
                 }
+                setIsBranchesLoaded(true);
             }
         }
         fetchBranches();
@@ -105,24 +149,26 @@ export default function HomePage() {
 
             if (data) {
                 setRooms(data);
-                setSelectedRoom(""); // Reset room selection
+                setSelectedRoom("all");
             }
         }
         fetchRooms();
     }, [selectedBranch]);
-
     // Carrega bookings
     const fetchBookings = useCallback(async () => {
+        if (!isBranchesLoaded) return;
+
         setIsLoading(true);
 
         try {
             let start: Date, end: Date;
             if (viewType === "weekly") {
-                start = startOfWeek(currentDate, { weekStartsOn: 1 });
-                end = endOfWeek(currentDate, { weekStartsOn: 1 });
+                // Pega a semana inteira + margem de segurança para timezone
+                start = subDays(startOfWeek(currentDate, { weekStartsOn: 1 }), 1);
+                end = addDays(endOfWeek(currentDate, { weekStartsOn: 1 }), 1);
             } else {
-                start = currentDate;
-                end = addDays(currentDate, 1);
+                start = subDays(currentDate, 1);
+                end = addDays(currentDate, 2);
             }
 
             let query = supabase
@@ -132,20 +178,17 @@ export default function HomePage() {
                 .lt("end_time", end.toISOString())
                 .order("start_time");
 
-            // Filtra por filial se selecionada
             if (selectedBranch) {
                 query = query.eq("branch_id", selectedBranch);
             }
 
-            // Filtra por sala se selecionada
-            if (selectedRoom) {
+            if (selectedRoom && selectedRoom !== "all") {
                 query = query.eq("room_id", selectedRoom);
             }
 
             const { data, error } = await query;
 
             if (data) {
-                // Converte para CalendarEvent
                 const calendarEvents: CalendarEvent[] = data.map((booking) => ({
                     id: booking.id,
                     title: booking.title,
@@ -157,6 +200,7 @@ export default function HomePage() {
                     userId: booking.user_id,
                     userName: booking.user_name,
                     userEmail: booking.user_email,
+                    creatorName: booking.creator_name, // Mapeado novo campo
                     isRecurring: booking.is_recurring,
                     status: booking.status as "confirmed" | "cancelled" | "pending",
                 }));
@@ -168,255 +212,371 @@ export default function HomePage() {
         } finally {
             setIsLoading(false);
         }
-    }, [currentDate, viewType, selectedBranch, selectedRoom]);
+    }, [currentDate, viewType, selectedBranch, selectedRoom, supabase, isBranchesLoaded]);
 
     useEffect(() => {
         fetchBookings();
     }, [fetchBookings]);
 
-    const handleSlotClick = (date: Date, hour: number, minute: number) => {
-        setInitialBookingDate(date);
-        setInitialBookingTime(`${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`);
-        setShowBookingForm(true);
+    const handleEventClick = (event: CalendarEvent) => {
+        setSelectedEvent(event);
+        setIsCancelling(false); // Resetar ao abrir
+        setCancelEmail("");
+        setCancelError("");
     };
 
-    const handleEventClick = (event: CalendarEvent) => {
-        // TODO: Abrir modal de detalhes/edição do evento
-        console.log("Event clicked:", event);
+    const handleStartCancellation = () => {
+        setIsCancelling(true);
+        setCancelStep("email");
+        setCancelError("");
+    };
+
+    const handleRequestToken = async () => {
+        if (!selectedEvent) return;
+        if (!cancelEmail) { setCancelError("Digite o email usado na reserva."); return; }
+
+        setIsProcessingCancel(true);
+        setCancelError("");
+
+        const res = await requestCancellation(selectedEvent.id, cancelEmail);
+        setIsProcessingCancel(false);
+
+        if (res.success) {
+            setCancelStep("otp");
+            setCancelError("");
+        } else {
+            setCancelError(res.message || "Erro ao solicitar código.");
+        }
+    };
+
+    const handleConfirmCancellation = async () => {
+        if (!selectedEvent) return;
+        if (!cancelToken) { setCancelError("Digite o código recebido."); return; }
+
+        setIsProcessingCancel(true);
+        setCancelError("");
+
+        const res = await confirmCancellation(selectedEvent.id, cancelToken);
+        setIsProcessingCancel(false);
+
+        if (res.success) {
+            setSelectedEvent(null);
+            setIsCancelling(false);
+            fetchBookings();
+            // Idealmente exibir um Toast de sucesso, mas vamos fechar por enquanto
+        } else {
+            setCancelError(res.message || "Código inválido.");
+        }
+    };
+
+    const handleSlotClick = (date: Date) => {
+        setInitialBookingDate(date);
+
+        // Formata hora para string HH:00 ou HH:30
+        const hours = date.getHours().toString().padStart(2, "0");
+        const minutes = date.getMinutes().toString().padStart(2, "0");
+        setInitialBookingTime(`${hours}:${minutes}`);
+
+        setShowBookingForm(true);
     };
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
         window.location.href = "/login";
     };
-
     return (
-        <div className="min-h-screen flex flex-col">
-            {/* Header */}
-            <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-                <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-2 rounded-lg">
-                            <Calendar className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                                REUNI-O
-                            </h1>
-                            <p className="text-xs text-muted-foreground">
-                                Sistema de Reserva de Salas
-                            </p>
+        <div className="flex h-screen bg-background overflow-hidden relative">
+            {/* Sidebar Desktop */}
+            <div className="hidden lg:flex w-[300px] flex-col border-r bg-muted/40 p-4 gap-6 shrink-0 h-full overflow-y-auto">
+                <div className="flex items-center gap-3 px-2">
+                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <CalendarIcon className="h-6 w-6 text-primary" />
+                    </div>
+                    <div className="flex flex-col justify-center border-l pl-4 h-10 border-border/50">
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground leading-none">Salas de</span>
+                        <span className="text-sm font-bold uppercase tracking-widest text-foreground leading-tight">Reunião</span>
+                    </div>
+                </div>
+
+                <div className="flex-1 flex flex-col gap-6 overflow-hidden min-h-0">
+                    {/* Mini Calendário */}
+                    <div className="space-y-2 shrink-0">
+                        <Label className="text-xs font-semibold uppercase text-muted-foreground">Navegação</Label>
+                        <div className="rounded-md border bg-background shadow-sm">
+                            <Calendar
+                                mode="single"
+                                selected={currentDate}
+                                onSelect={(date) => date && setCurrentDate(date)}
+                                initialFocus
+                                locale={ptBR}
+                                className="p-3"
+                            />
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                        {/* Filtros */}
-                        <div className="flex items-center gap-2">
-                            <Building2 className="h-4 w-4 text-muted-foreground" />
-                            <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                                <SelectTrigger className="w-[180px]">
-                                    <SelectValue placeholder="Selecione a filial" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {branches.map((branch) => (
-                                        <SelectItem key={branch.id} value={branch.id}>
-                                            {branch.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                    {/* Lista Eventos Dia */}
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                        <Label className="text-xs font-semibold uppercase text-muted-foreground mb-2 shrink-0">
+                            Agenda do Dia ({format(currentDate, "dd/MM", { locale: ptBR })})
+                        </Label>
+                        <DailyEventList events={events} currentDate={currentDate} />
+                    </div>
+                </div>
 
-                        <div className="flex items-center gap-2">
-                            <DoorOpen className="h-4 w-4 text-muted-foreground" />
-                            <Select value={selectedRoom} onValueChange={setSelectedRoom}>
-                                <SelectTrigger className="w-[180px]">
-                                    <SelectValue placeholder="Todas as salas" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="">Todas as salas</SelectItem>
-                                    {rooms.map((room) => (
-                                        <SelectItem key={room.id} value={room.id}>
-                                            {room.name} ({room.capacity}p)
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                <div className="mt-auto pt-4 border-t">
+                    <Button variant="outline" className="w-full justify-start text-muted-foreground hover:text-destructive" onClick={handleLogout}>
+                        Sair do Sistema
+                    </Button>
+                </div>
+            </div>
 
-                        {/* Botão Nova Reserva */}
-                        <Popover open={showBookingForm} onOpenChange={setShowBookingForm}>
-                            <PopoverTrigger asChild>
-                                <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700">
-                                    <Plus className="h-4 w-4 mr-2" />
-                                    Nova Reserva
+            {/* Main Content Area */}
+            <div className="flex-1 flex flex-col overflow-hidden w-full">
+                {/* Header */}
+                <header className="h-14 border-b bg-background/95 backdrop-blur px-4 flex items-center justify-between shrink-0 z-10 sticky top-0">
+                    <div className="flex items-center w-full gap-4">
+                        {/* Mobile & Logo */}
+                        <div className="lg:hidden flex items-center gap-2 font-bold italic text-xl mr-auto">
+                            BEXP
+                        </div>
+                        {/* Filtros e Controles */}
+                        <div className="flex flex-1 items-center justify-end gap-2 md:gap-4">
+
+                            {/* Seletor de Filial */}
+                            <div className="hidden sm:flex items-center gap-2">
+                                <Building2 className="h-4 w-4 text-muted-foreground" />
+                                <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+                                    <SelectTrigger className="w-[300px] md:w-[450px]">
+                                        <SelectValue placeholder="Filial" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {branches.map((branch) => (
+                                            <SelectItem key={branch.id} value={branch.id}>
+                                                {branch.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* Seletor de Sala */}
+                            <div className="hidden sm:flex items-center gap-2">
+                                <DoorOpen className="h-4 w-4 text-muted-foreground" />
+                                <Select value={selectedRoom} onValueChange={setSelectedRoom}>
+                                    <SelectTrigger className="w-[140px] md:w-[180px]">
+                                        <SelectValue placeholder="Todas as salas" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Todas as salas</SelectItem>
+                                        {rooms.map((room) => (
+                                            <SelectItem key={room.id} value={room.id}>
+                                                {room.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="h-6 w-px bg-border hidden sm:block" />
+
+                            {/* View Toggle */}
+                            <div className="flex items-center bg-muted rounded-md p-1">
+                                <Button
+                                    variant={viewType === "weekly" ? "secondary" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setViewType("weekly")}
+                                    className="h-7 text-xs px-3"
+                                >
+                                    Semana
                                 </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="end">
-                                <BookingForm
-                                    initialDate={initialBookingDate}
-                                    initialTime={initialBookingTime}
-                                    onSuccess={() => {
-                                        setShowBookingForm(false);
-                                        fetchBookings();
-                                    }}
-                                    onCancel={() => setShowBookingForm(false)}
-                                />
-                            </PopoverContent>
-                        </Popover>
-
-                        {/* User Menu */}
-                        {user && (
-                            <div className="flex items-center gap-2 pl-4 border-l">
-                                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-sm font-medium">
-                                    {user.name.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="hidden md:block">
-                                    <p className="text-sm font-medium">{user.name}</p>
-                                    <p className="text-xs text-muted-foreground">{user.email}</p>
-                                </div>
-                                <Button variant="ghost" size="icon" onClick={handleLogout} title="Sair">
-                                    <LogOut className="h-4 w-4" />
+                                <Button
+                                    variant={viewType === "daily" ? "secondary" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setViewType("daily")}
+                                    className="h-7 text-xs px-3"
+                                >
+                                    Dia
                                 </Button>
                             </div>
-                        )}
-                    </div>
-                </div>
-            </header>
 
-            {/* Main Content */}
-            <main className="flex-1 container mx-auto px-4 py-6">
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                    {/* Sidebar com informações */}
-                    <div className="lg:col-span-1 space-y-4">
-                        {/* Resumo */}
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-base">Resumo</CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-2">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Reservas hoje:</span>
-                                    <span className="font-medium">
-                                        {events.filter(e =>
-                                            e.startTime.toDateString() === new Date().toDateString()
-                                        ).length}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Esta semana:</span>
-                                    <span className="font-medium">{events.length}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Salas disponíveis:</span>
-                                    <span className="font-medium">{rooms.length}</span>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* Legenda de cores */}
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-base">Salas</CardTitle>
-                                <CardDescription className="text-xs">
-                                    Clique em uma sala para filtrar
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-2">
-                                {rooms.length === 0 ? (
-                                    <p className="text-sm text-muted-foreground">
-                                        Selecione uma filial para ver as salas
-                                    </p>
-                                ) : (
-                                    rooms.map((room) => (
-                                        <button
-                                            key={room.id}
-                                            onClick={() =>
-                                                setSelectedRoom(selectedRoom === room.id ? "" : room.id)
-                                            }
-                                            className={cn(
-                                                "w-full flex items-center gap-2 p-2 rounded-md text-left text-sm transition-colors",
-                                                selectedRoom === room.id
-                                                    ? "bg-primary/10 text-primary"
-                                                    : "hover:bg-muted"
-                                            )}
-                                        >
-                                            <DoorOpen className="h-4 w-4" />
-                                            <div className="flex-1">
-                                                <p className="font-medium">{room.name}</p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {room.capacity} pessoas
-                                                    {room.floor && ` • ${room.floor}`}
-                                                </p>
-                                            </div>
-                                        </button>
-                                    ))
-                                )}
-                            </CardContent>
-                        </Card>
-
-                        {/* Toggle de visualização */}
-                        <Card>
-                            <CardContent className="pt-4">
-                                <div className="flex gap-2">
-                                    <Button
-                                        variant={viewType === "weekly" ? "default" : "outline"}
-                                        size="sm"
-                                        className="flex-1"
-                                        onClick={() => setViewType("weekly")}
-                                    >
-                                        Semana
+                            {/* Botão Nova Reserva */}
+                            <Popover open={showBookingForm} onOpenChange={setShowBookingForm}>
+                                <PopoverTrigger asChild>
+                                    <Button size="sm" className="bg-primary hover:bg-primary/90">
+                                        <Plus className="h-4 w-4 mr-2" />
+                                        Nova Reserva
                                     </Button>
-                                    <Button
-                                        variant={viewType === "daily" ? "default" : "outline"}
-                                        size="sm"
-                                        className="flex-1"
-                                        onClick={() => setViewType("daily")}
-                                    >
-                                        Dia
-                                    </Button>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    {/* Calendário */}
-                    <div className="lg:col-span-3">
-                        <div
-                            className="h-[calc(100vh-200px)] min-h-[600px]"
-                        >
-                            {viewType === "weekly" ? (
-                                <WeeklyView
-                                    currentDate={currentDate}
-                                    events={events}
-                                    onDateChange={setCurrentDate}
-                                    onEventClick={handleEventClick}
-                                    onSlotClick={handleSlotClick}
-                                    isLoading={isLoading}
-                                />
-                            ) : (
-                                <DailyView
-                                    currentDate={currentDate}
-                                    events={events}
-                                    onDateChange={setCurrentDate}
-                                    onEventClick={handleEventClick}
-                                    onSlotClick={handleSlotClick}
-                                    onViewChange={() => setViewType("weekly")}
-                                    isLoading={isLoading}
-                                />
-                            )}
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="end" sideOffset={8}>
+                                    <BookingForm
+                                        initialDate={initialBookingDate}
+                                        initialTime={initialBookingTime}
+                                        onSuccess={() => {
+                                            setShowBookingForm(false);
+                                            fetchBookings();
+                                        }}
+                                        onCancel={() => setShowBookingForm(false)}
+                                    />
+                                </PopoverContent>
+                            </Popover>
                         </div>
                     </div>
-                </div>
-            </main>
+                </header>
 
-            {/* Footer */}
-            <footer className="border-t py-4 text-center text-sm text-muted-foreground">
-                <p>
-                    REUNI-O © {new Date().getFullYear()} • Sistema de Reserva de Salas de
-                    Reunião
-                </p>
-            </footer>
-        </div>
+                {/* Área do Calendário */}
+                <main className="flex-1 overflow-hidden p-4 bg-muted/10">
+                    <div className="h-full bg-background rounded-lg border shadow-sm overflow-hidden flex flex-col">
+                        {viewType === "weekly" ? (
+                            <WeeklyView
+                                currentDate={currentDate}
+                                events={events}
+                                onDateChange={setCurrentDate}
+                                onEventClick={handleEventClick}
+                                onSlotClick={handleSlotClick}
+                                isLoading={isLoading}
+                            />
+                        ) : (
+                            <DailyView
+                                currentDate={currentDate}
+                                events={events}
+                                onDateChange={setCurrentDate}
+                                onEventClick={handleEventClick}
+                                onSlotClick={handleSlotClick}
+                                onViewChange={() => setViewType("weekly")}
+                                isLoading={isLoading}
+                            />
+                        )}
+                    </div>
+                </main>
+
+                {/* Footer */}
+                <footer className="shrink-0 border-t py-2 px-4 bg-background text-center text-xs text-muted-foreground flex items-center justify-between">
+                    <span>BEXP SALAS DE REUNIÃO © {new Date().getFullYear()}</span>
+                    <div className="flex items-center gap-4">
+                        <span className="hidden sm:inline">Sistema de Gestão de Espaços</span>
+                        {/* Admin Link discreto */}
+                        <a href="/admin" className="hover:text-primary transition-colors">Admin</a>
+                    </div>
+                </footer>
+                {/* Modal de Detalhes / Cancelamento (Movido para root level) */}
+                {
+                    selectedEvent && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+                            <div className="bg-card border rounded-lg shadow-lg w-full max-w-md p-6 relative">
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute right-4 top-4"
+                                    onClick={() => setSelectedEvent(null)}
+                                >
+                                    <span className="sr-only">Fechar</span>
+                                    <Plus className="h-4 w-4 rotate-45" />
+                                </Button>
+
+                                {!isCancelling ? (
+                                    // STEP 0: Detalhes
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h3 className="font-semibold text-lg">{selectedEvent.title}</h3>
+                                            <p className="text-sm text-muted-foreground">{selectedEvent.roomName}</p>
+                                        </div>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between py-1 border-b">
+                                                <span className="text-muted-foreground">Data:</span>
+                                                <span className="font-medium">
+                                                    {format(selectedEvent.startTime, "dd/MM/yyyy", { locale: ptBR })}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between py-1 border-b">
+                                                <span className="text-muted-foreground">Horário:</span>
+                                                <span className="font-medium">
+                                                    {format(selectedEvent.startTime, "HH:mm")} - {format(selectedEvent.endTime, "HH:mm")}
+                                                </span>
+                                            </div>
+                                            {selectedEvent.description && (
+                                                <div className="py-1 border-b">
+                                                    <span className="text-muted-foreground block mb-1">Descrição:</span>
+                                                    <p className="whitespace-pre-wrap">{selectedEvent.description}</p>
+                                                </div>
+                                            )}
+                                            <div className="py-1">
+                                                <span className="text-muted-foreground block mb-1">Responsável:</span>
+                                                <span className="font-medium uppercase">{selectedEvent.creatorName || selectedEvent.userName || "Anônimo"}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="pt-4 border-t flex justify-end gap-2">
+                                            <Button variant="outline" onClick={() => setSelectedEvent(null)}>
+                                                Fechar
+                                            </Button>
+                                            <Button variant="destructive" onClick={handleStartCancellation}>
+                                                Cancelar Reserva
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <h3 className="font-semibold text-lg text-destructive">Cancelar Reserva</h3>
+
+                                        {cancelStep === 'email' ? (
+                                            <div className="space-y-4">
+                                                <p className="text-sm text-muted-foreground">
+                                                    Para segurança, confirme o e-mail utilizado na reserva. Enviaremos um código de validação.
+                                                </p>
+                                                <div className="space-y-2">
+                                                    <Label>Seu E-mail</Label>
+                                                    <Input
+                                                        type="email"
+                                                        placeholder="ex: nome@empresa.com"
+                                                        value={cancelEmail}
+                                                        onChange={(e) => setCancelEmail(e.target.value)}
+                                                    />
+                                                </div>
+                                                {cancelError && <p className="text-xs text-destructive font-medium">{cancelError}</p>}
+                                                <div className="flex justify-end gap-2 pt-2">
+                                                    <Button variant="ghost" onClick={() => setIsCancelling(false)}>Voltar</Button>
+                                                    <Button
+                                                        onClick={handleRequestToken}
+                                                        disabled={isProcessingCancel || !cancelEmail}
+                                                    >
+                                                        {isProcessingCancel ? "Enviando..." : "Enviar Código"}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                <p className="text-sm text-muted-foreground">
+                                                    Insira o código enviado para <strong>{cancelEmail}</strong>.
+                                                </p>
+                                                <div className="space-y-2">
+                                                    <Label>Código de Validação</Label>
+                                                    <Input
+                                                        placeholder="000000"
+                                                        value={cancelToken}
+                                                        onChange={(e) => setCancelToken(e.target.value)}
+                                                        maxLength={6}
+                                                    />
+                                                </div>
+                                                {cancelError && <p className="text-xs text-destructive font-medium">{cancelError}</p>}
+                                                <div className="flex justify-end gap-2 pt-2">
+                                                    <Button variant="ghost" onClick={() => setCancelStep('email')}>Voltar</Button>
+                                                    <Button
+                                                        variant="destructive"
+                                                        onClick={handleConfirmCancellation}
+                                                        disabled={isProcessingCancel || !cancelToken}
+                                                    >
+                                                        {isProcessingCancel ? "Cancelando..." : "Confirmar Cancelamento"}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )
+                }
+            </div >
+        </div >
     );
 }

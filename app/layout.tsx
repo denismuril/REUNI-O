@@ -6,10 +6,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-    title: "REUNI-O | Sistema de Reserva de Salas",
+    title: "BEXP | Salas de Reunião",
     description:
-        "Sistema corporativo de reserva de salas de reunião. Gerencie reservas, visualize disponibilidade e evite conflitos de agendamento.",
-    keywords: ["reserva de salas", "meeting room", "agendamento", "reuniões"],
+        "Sistema corporativo de reserva de salas de reunião BEXP. Gerencie reservas, visualize disponibilidade e evite conflitos de agendamento.",
+    keywords: ["reserva de salas", "meeting room", "agendamento", "reuniões", "BEXP"],
 };
 
 export default function RootLayout({

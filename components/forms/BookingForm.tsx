@@ -40,6 +40,8 @@ const bookingFormSchema = z
     .object({
         branchId: z.string().min(1, "Selecione uma filial"),
         roomId: z.string().min(1, "Selecione uma sala"),
+        creatorName: z.string().min(3, "Informe seu nome completo (mínimo 3 letras)"),
+        creatorEmail: z.string().email("Informe um e-mail válido"),
         title: z
             .string()
             .min(3, "O título deve ter pelo menos 3 caracteres")
@@ -117,6 +119,8 @@ export function BookingForm({
         defaultValues: {
             branchId: "",
             roomId: "",
+            creatorName: "",
+            creatorEmail: "",
             title: "",
             description: "",
             date: initialDate || new Date(),
@@ -128,6 +132,8 @@ export function BookingForm({
 
     const selectedBranchId = watch("branchId");
     const selectedRecurrence = watch("recurrence");
+    const selectedStartTime = watch("startTime");
+    const selectedEndTime = watch("endTime");
 
     // Carrega filiais ao montar o componente
     useEffect(() => {
@@ -168,82 +174,81 @@ export function BookingForm({
         fetchRooms();
     }, [selectedBranchId, setValue]);
 
+    // Atualiza endTime automaticamente quando startTime muda (gera duração padrão de 1h)
+    useEffect(() => {
+        if (!selectedStartTime) return;
+
+        const [hours, minutes] = selectedStartTime.split(':').map(Number);
+        // Adiciona 1 hora por padrão
+        let endHours = hours + 1;
+
+        // Formata para HH:mm
+        const formattedEnd = `${String(endHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+
+        // Se o horário final calculado for menor ou igual ao inicial (ex: virada de dia) ou inválido, ignora
+        // Mas aqui assume-se dia comercial simples.
+
+        // Verifica se o novo endTime proposto é diferente do atual para evitar loop se o usuário mudou o endTime manualmente para outro valor valido?
+        // Na verdade, queremos forçar a mudança se o startTime mudar.
+        // Mas se o usuário mudar o endTime e depois o startTime, o endTime reseta. Isso é o comportamento esperado "inteligente".
+
+        setValue("endTime", formattedEnd);
+    }, [selectedStartTime, setValue]);
+
+
     const onSubmit = async (data: BookingFormData) => {
         setIsSubmitting(true);
         setError(null);
         setSuccessMessage(null);
 
         try {
-            // Obtém o usuário atual
-            const {
-                data: { user },
-                error: authError,
-            } = await supabase.auth.getUser();
-
-            if (authError || !user) {
-                throw new Error("Você precisa estar autenticado para fazer uma reserva");
-            }
-
             // Combina data e horários
             const startDateTime = combineDateAndTime(data.date, data.startTime);
             const endDateTime = combineDateAndTime(data.date, data.endTime);
 
-            // Se for recorrente, usa a função do banco de dados
-            if (data.recurrence !== "none") {
-                const { data: bookings, error } = await supabase.rpc(
-                    "expand_recurring_booking",
-                    {
-                        p_room_id: data.roomId,
-                        p_user_id: user.id,
-                        p_title: data.title,
-                        p_description: data.description || null,
-                        p_start_time: startDateTime.toISOString(),
-                        p_end_time: endDateTime.toISOString(),
-                        p_recurrence_type: data.recurrence,
-                        p_months_ahead: 3,
-                    }
-                );
-
-                if (error) {
-                    if (error.message.includes("DOUBLE_BOOKING")) {
-                        throw new Error(
-                            "Conflito de horário: uma ou mais datas já possuem reservas neste horário"
-                        );
-                    }
-                    throw error;
-                }
-
-                const count = Array.isArray(bookings) ? bookings.length : 1;
-                setSuccessMessage(
-                    `✅ ${count} reserva${count > 1 ? "s" : ""} criada${count > 1 ? "s" : ""} com sucesso!`
-                );
-            } else {
-                // Reserva única
-                const { error } = await supabase.from("bookings").insert({
-                    room_id: data.roomId,
-                    user_id: user.id,
-                    title: data.title,
-                    description: data.description || null,
-                    start_time: startDateTime.toISOString(),
-                    end_time: endDateTime.toISOString(),
-                    is_recurring: false,
-                });
-
-                if (error) {
-                    if (error.message.includes("DOUBLE_BOOKING")) {
-                        throw new Error(
-                            "Este horário já está reservado. Por favor, escolha outro horário."
-                        );
-                    }
-                    throw error;
-                }
-
-                setSuccessMessage("✅ Reserva criada com sucesso!");
+            // Validação: Não permitir passado
+            if (startDateTime < new Date()) {
+                setError("Não é possível criar reservas no passado.");
+                setIsSubmitting(false);
+                return;
             }
+
+            // Validação: Término deve ser depois do início
+            if (endDateTime <= startDateTime) {
+                setError("O horário de término deve ser após o horário de início.");
+                setIsSubmitting(false);
+                return;
+            }
+
+
+            // Reserva única
+            const { error } = await supabase.from("bookings").insert({
+                room_id: data.roomId,
+                user_id: null, // Anônimo explícito
+                creator_name: data.creatorName,
+                creator_email: data.creatorEmail,
+                title: data.title,
+                description: data.description,
+                start_time: startDateTime.toISOString(),
+                end_time: endDateTime.toISOString(),
+                is_recurring: false,
+            });
+
+            if (error) {
+                if (error.message.includes("DOUBLE_BOOKING")) {
+                    throw new Error(
+                        "Este horário já está reservado. Por favor, escolha outro horário."
+                    );
+                }
+                throw error;
+            }
+
+            setSuccessMessage("✅ Reserva criada com sucesso!");
 
             // Limpa o formulário após sucesso
             reset();
             onSuccess?.();
+
         } catch (err) {
             setError(err instanceof Error ? err.message : "Erro ao criar reserva");
         } finally {
@@ -252,15 +257,16 @@ export function BookingForm({
     };
 
     return (
-        <Card className="w-full max-w-lg">
-            <CardHeader>
-                <CardTitle>Nova Reserva</CardTitle>
-                <CardDescription>
+        <Card className="w-full max-w-lg max-h-[85vh] flex flex-col">
+            <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Nova Reserva</CardTitle>
+                <CardDescription className="text-sm">
                     Preencha os dados para reservar uma sala de reunião
                 </CardDescription>
             </CardHeader>
-            <form onSubmit={handleSubmit(onSubmit)}>
-                <CardContent className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col flex-1 overflow-hidden">
+                <CardContent className="space-y-4 overflow-y-auto flex-1 px-4 md:px-6">
+
                     {/* Mensagens de erro/sucesso */}
                     {error && (
                         <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-sm">
@@ -337,12 +343,39 @@ export function BookingForm({
                         )}
                     </div>
 
+                    <div className="space-y-2">
+                        <Label htmlFor="creatorName">Responsável pela Reserva *</Label>
+                        <Input
+                            id="creatorName"
+                            placeholder="Seu nome completo"
+                            disabled={isSubmitting}
+                            {...register("creatorName")}
+                        />
+                        {errors.creatorName && (
+                            <p className="text-sm text-destructive">{errors.creatorName.message}</p>
+                        )}
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="creatorEmail">Seu E-mail (obrigatório para cancelamento) *</Label>
+                        <Input
+                            id="creatorEmail"
+                            type="email"
+                            placeholder="seu.email@exemplo.com"
+                            disabled={isSubmitting}
+                            {...register("creatorEmail")}
+                        />
+                        {errors.creatorEmail && (
+                            <p className="text-sm text-destructive">{errors.creatorEmail.message}</p>
+                        )}
+                    </div>
+
                     {/* Título */}
                     <div className="space-y-2">
                         <Label htmlFor="title">Título da Reunião *</Label>
                         <Input
                             id="title"
-                            placeholder="Ex: Reunião de Planejamento Q1"
+                            placeholder="Ex: Reunião Mensal de Resultados"
                             {...register("title")}
                         />
                         {errors.title && (

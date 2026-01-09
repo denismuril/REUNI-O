@@ -131,7 +131,7 @@ export interface Database {
                 Row: {
                     id: string;
                     room_id: string;
-                    user_id: string;
+                    user_id: string | null;
                     title: string;
                     description: string | null;
                     start_time: string;
@@ -140,13 +140,15 @@ export interface Database {
                     recurrence_type: 'daily' | 'weekly' | null;
                     parent_booking_id: string | null;
                     status: 'confirmed' | 'cancelled' | 'pending';
+                    creator_name: string | null;
+                    creator_email: string | null;
                     created_at: string;
                     updated_at: string;
                 };
                 Insert: {
                     id?: string;
                     room_id: string;
-                    user_id: string;
+                    user_id?: string | null;
                     title: string;
                     description?: string | null;
                     start_time: string;
@@ -155,6 +157,8 @@ export interface Database {
                     recurrence_type?: 'daily' | 'weekly' | null;
                     parent_booking_id?: string | null;
                     status?: 'confirmed' | 'cancelled' | 'pending';
+                    creator_name?: string | null;
+                    creator_email?: string | null;
                     created_at?: string;
                     updated_at?: string;
                 };
@@ -216,9 +220,11 @@ export interface Database {
                     branch_name: string;
                     branch_location: string;
                     branch_timezone: string;
-                    user_id: string;
+                    user_id: string | null;
                     user_name: string;
                     user_email: string;
+                    creator_name: string | null;
+                    creator_email: string | null;
                 };
             };
         };

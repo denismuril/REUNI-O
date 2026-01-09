@@ -2,168 +2,140 @@
 
 Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14, Supabase e Tailwind CSS.
 
+![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)
+![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)
+![Tailwind](https://img.shields.io/badge/Tailwind-3.x-38B2AC?logo=tailwind-css)
+
 ## 🚀 Funcionalidades
 
-- **Hierarquia Organizacional**: Empresa > Filiais > Salas de Reunião
+### Usuários
+
 - **Calendário Visual**: Visualização semanal e diária das reservas
-- **Prevenção de Double Booking**: Validação em nível de banco de dados
-- **Eventos Recorrentes**: Suporte a repetição diária e semanal (3 meses)
-- **Hover com Detalhes**: Veja informações da reserva ao passar o mouse
-- **Notificações por Email**: Templates prontos para integração
+- **Reserva de Salas**: Formulário completo com validação
+- **Eventos Recorrentes**: Suporte a repetição diária e semanal
+- **Cancelamento com OTP**: Confirmação segura via email
+- **Hover com Detalhes**: Informações da reserva ao passar o mouse
+
+### Administração
+
+- **Gestão de Filiais**: CRUD completo de filiais/localizações
+- **Gestão de Salas**: CRUD com cores personalizadas
+- **Exclusão de Reuniões**: Com auditoria e registro de motivo
+- **Logs de Ações**: Histórico de exclusões administrativas
+
+### Técnico
+
+- **Prevenção de Double Booking**: Validação em nível de banco
+- **RLS (Row Level Security)**: Segurança no nível do banco de dados
+- **Server Actions**: Operações seguras no servidor
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 14 (App Router)
-- **Estilização**: Tailwind CSS + Shadcn/ui
-- **Backend/DB**: Supabase (PostgreSQL)
-- **Autenticação**: Supabase Auth
-- **Formulários**: React Hook Form + Zod
-- **Linguagem**: TypeScript
+| Tecnologia | Versão | Uso |
+|------------|--------|-----|
+| Next.js | 14.x | Framework React (App Router) |
+| TypeScript | 5.x | Tipagem estática |
+| Tailwind CSS | 3.x | Estilização |
+| Supabase | - | Backend + Auth + PostgreSQL |
+| Resend | - | Emails transacionais |
+| shadcn/ui | - | Componentes UI |
 
-## 📦 Instalação
+## 📦 Início Rápido
 
-### Pré-requisitos
+```bash
+# Clone
+git clone https://github.com/seu-usuario/REUNI-O.git
+cd REUNI-O
 
-- Node.js 18+
-- npm ou yarn
-- Conta no [Supabase](https://supabase.com)
+# Instale dependências
+npm install
 
-### Passos
+# Configure variáveis de ambiente
+cp .env.example .env.local
+# Edite .env.local com suas credenciais
 
-1. **Clone o repositório**
+# Execute em desenvolvimento
+npm run dev
+```
 
-   ```bash
-   git clone https://github.com/seu-usuario/REUNI-O.git
-   cd REUNI-O
-   ```
+Acesse: **<http://localhost:3000>**
 
-2. **Instale as dependências**
+## 📚 Documentação
 
-   ```bash
-   npm install
-   ```
-
-3. **Configure as variáveis de ambiente**
-
-   ```bash
-   cp .env.example .env.local
-   ```
-
-   Preencha com suas credenciais do Supabase:
-
-   ```env
-   NEXT_PUBLIC_SUPABASE_URL=sua_url_do_supabase
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=sua_chave_anon
-   ```
-
-4. **Execute a migração no Supabase**
-
-   No painel do Supabase, vá em SQL Editor e execute o conteúdo de:
-
-   ```
-   supabase/migrations/20260108180000_init_room_booking.sql
-   ```
-
-5. **Inicie o servidor de desenvolvimento**
-
-   ```bash
-   npm run dev
-   ```
-
-6. **Acesse** <http://localhost:3000>
+| Documento | Descrição |
+|-----------|-----------|
+| [📋 Instalação](docs/INSTALL.md) | Configuração do ambiente local |
+| [🚀 Deploy](docs/DEPLOY.md) | Deploy em servidor Linux |
+| [🏗️ Arquitetura](docs/ARCHITECTURE.md) | Estrutura e fluxos do sistema |
 
 ## 📁 Estrutura do Projeto
 
 ```
 REUNI-O/
-├── app/
-│   ├── api/
-│   │   └── send-email/       # API de notificações
-│   ├── auth/
-│   │   └── callback/         # Callback de autenticação
-│   ├── login/                # Página de login
-│   ├── globals.css           # Estilos globais
-│   ├── layout.tsx            # Layout raiz
-│   └── page.tsx              # Página principal (calendário)
+├── app/                      # Páginas Next.js (App Router)
+│   ├── actions/              # Server Actions
+│   ├── admin/                # Painel Administrativo
+│   ├── api/                  # API Routes
+│   ├── auth/                 # Auth Callback
+│   ├── login/                # Login
+│   └── page.tsx              # Calendário Principal
 ├── components/
-│   ├── calendar/             # Componentes do calendário
-│   │   ├── WeeklyView.tsx
-│   │   ├── DailyView.tsx
-│   │   └── EventBlock.tsx
-│   ├── forms/
-│   │   └── BookingForm.tsx   # Formulário de reserva
-│   └── ui/                   # Componentes Shadcn/ui
+│   ├── calendar/             # Componentes de Calendário
+│   ├── forms/                # Formulários
+│   └── ui/                   # Componentes UI (shadcn)
 ├── lib/
-│   ├── supabase/             # Clientes Supabase
-│   └── utils.ts              # Funções utilitárias
-├── types/
-│   ├── supabase.ts           # Tipos do banco de dados
-│   └── booking.ts            # Tipos do calendário
-└── supabase/
-    └── migrations/           # Migrações SQL
+│   └── supabase/             # Clientes Supabase
+├── types/                    # TypeScript Types
+├── docs/                     # Documentação
+│   ├── INSTALL.md
+│   ├── DEPLOY.md
+│   └── ARCHITECTURE.md
+└── supabase/                 # Migrations
 ```
 
-## 🔐 Banco de Dados
+## 🔐 Variáveis de Ambiente
 
-### Tabelas
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 
-- **profiles**: Usuários do sistema (vinculado ao auth.users)
-- **branches**: Filiais/Localizações da empresa
-- **rooms**: Salas de reunião por filial
-- **bookings**: Reservas de salas
+# Resend (Email)
+RESEND_API_KEY=re_xxx
 
-### Políticas RLS
+# App
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
 
-- Todos os usuários autenticados podem visualizar dados
-- Apenas admins podem criar/editar filiais e salas
-- Usuários podem criar reservas e editar/cancelar apenas suas próprias
+## 🗃️ Modelo de Dados
 
-### Funções
+```
+branches (Filiais)
+    └── rooms (Salas)
+            └── bookings (Reservas)
 
-- `check_availability()`: Verifica disponibilidade de horário
-- `expand_recurring_booking()`: Expande reservas recorrentes
-- `prevent_double_booking()`: Trigger para prevenir conflitos
+admin_deletion_logs (Auditoria)
+```
 
-## 🎨 Componentes
+## 🚧 Roadmap
 
-### WeeklyView
-
-Grid de calendário Segunda a Sexta, 8h às 19h.
-
-### DailyView
-
-Visualização detalhada de um único dia com linha de hora atual.
-
-### EventBlock
-
-Bloco de evento com cores dinâmicas e tooltip com detalhes.
-
-### BookingForm
-
-Formulário completo com validação, seleção em cascata e suporte a recorrência.
-
-## 📧 Notificações
-
-A API de email está preparada para integração com:
-
-- [Resend](https://resend.com)
-- [SendGrid](https://sendgrid.com)
-- Amazon SES
-
-Templates incluídos:
-
-- Confirmação de reserva
-- Atualização de reserva
-- Cancelamento
-- Lembrete
-
-## 🚧 Próximos Passos
-
-- [ ] Integração real com serviço de email
-- [ ] Dashboard administrativo
-- [ ] Relatórios de utilização
-- [ ] Integração com calendários externos (Google, Outlook)
+- [x] Sistema de reservas
+- [x] Cancelamento com OTP
+- [x] Painel administrativo
+- [x] Logs de auditoria
+- [ ] Integração Google Calendar
 - [ ] App mobile (React Native)
+- [ ] Relatórios de utilização
+- [ ] Notificações push
+
+## 👥 Contribuindo
+
+1. Fork o projeto
+2. Crie sua branch (`git checkout -b feature/NovaFeature`)
+3. Commit suas mudanças (`git commit -m 'Add: nova feature'`)
+4. Push para a branch (`git push origin feature/NovaFeature`)
+5. Abra um Pull Request
 
 ## 📄 Licença
 
