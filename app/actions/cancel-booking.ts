@@ -2,11 +2,26 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
+import { isRateLimited, recordAttempt, clearRateLimit } from "@/lib/rate-limit";
 
 // Inicializa Resend com chave real ou valor dummy para evitar erro no construtor
 const resend = new Resend(process.env.RESEND_API_KEY || "re_123");
 
 export async function requestCancellation(bookingId: string, email: string) {
+    // Verificar rate limiting (3 tentativas por email em 15 minutos)
+    const rateLimitKey = `otp_request:${email.toLowerCase()}`;
+    const { limited, remainingAttempts, resetIn } = isRateLimited(rateLimitKey);
+
+    if (limited) {
+        return {
+            success: false,
+            message: `Muitas tentativas. Aguarde ${resetIn} segundos antes de tentar novamente.`,
+        };
+    }
+
+    // Registrar tentativa
+    recordAttempt(rateLimitKey);
+
     const supabase = await createClient();
 
     try {
@@ -31,7 +46,7 @@ export async function requestCancellation(bookingId: string, email: string) {
         if (process.env.RESEND_API_KEY) {
             try {
                 await resend.emails.send({
-                    from: 'Codigo OTP Cancelamento de Reunião <noreply@bexp.com.br>',
+                    from: 'RESERVA <noreply@bexp.com.br>',
                     to: email,
                     subject: 'Código de Cancelamento de Reserva',
                     html: `

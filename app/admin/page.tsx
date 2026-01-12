@@ -4,7 +4,8 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, FileText, Search } from "lucide-react";
+import Link from "next/link";
+import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, FileText, Search, BarChart3 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,10 +27,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { Branch, Room } from "@/types/supabase";
 import { getBookingsForAdmin, getDeletionLogs, adminDeleteBooking, BookingForAdmin, DeletionLog } from "@/app/actions/admin-actions";
-
-// Credenciais do admin (em produção, usar variáveis de ambiente)
-const ADMIN_USERNAME = "admin";
-const ADMIN_PASSWORD = "reuni0@2026";
 
 // Schemas
 const branchSchema = z.object({
@@ -156,13 +153,26 @@ export default function AdminPage() {
     };
 
     // Login
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-            setIsAuthenticated(true);
-            setLoginError("");
-        } else {
-            setLoginError("Usuário ou senha incorretos");
+        setLoginError("");
+
+        try {
+            const response = await fetch("/api/admin/auth", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password }),
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                setIsAuthenticated(true);
+            } else {
+                setLoginError(data.message || "Usuário ou senha incorretos");
+            }
+        } catch (error) {
+            setLoginError("Erro ao conectar com o servidor");
         }
     };
 
@@ -384,10 +394,18 @@ export default function AdminPage() {
                             <p className="text-xs text-muted-foreground">REUNI-O</p>
                         </div>
                     </div>
-                    <Button variant="outline" size="sm" onClick={handleLogout}>
-                        <LogOut className="h-4 w-4 mr-2" />
-                        Sair
-                    </Button>
+                    <div className="flex items-center gap-4">
+                        <Link href="/admin/reports">
+                            <Button variant="outline" className="gap-2">
+                                <BarChart3 className="h-4 w-4" />
+                                Relatórios
+                            </Button>
+                        </Link>
+                        <Button variant="ghost" onClick={handleLogout} className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50">
+                            <LogOut className="h-4 w-4" />
+                            Sair
+                        </Button>
+                    </div>
                 </div>
             </header>
 

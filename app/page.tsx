@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/popover";
 
 import { createClient } from "@/lib/supabase/client";
-import { Database } from "@/types/supabase";
+import { Database, BookingDetails } from "@/types/supabase";
 import { BookingForm } from "@/components/forms/BookingForm";
 import { DailyView } from "@/components/calendar/DailyView";
 import { WeeklyView } from "@/components/calendar/WeeklyView";
@@ -189,7 +189,7 @@ export default function HomePage() {
             const { data, error } = await query;
 
             if (data) {
-                const calendarEvents: CalendarEvent[] = data.map((booking) => ({
+                const calendarEvents: CalendarEvent[] = data.map((booking: BookingDetails) => ({
                     id: booking.id,
                     title: booking.title,
                     description: booking.description,
