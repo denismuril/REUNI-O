@@ -36,7 +36,7 @@ export function getBookingConfirmationTemplate(props: EmailTemplateProps): strin
             </div>
 
             <p style="color: #666; font-size: 12px; margin-top: 30px; text-align: center;">
-                Este é um email automático do sistema REUNI-O. Por favor, não responda.
+                Este é um email automático do sistema RESERVA. Por favor, não responda.
             </p>
         </div>
     </div>
@@ -60,7 +60,7 @@ export function getBookingReminderTemplate(props: EmailTemplateProps): string {
             </div>
 
             <p style="color: #666; font-size: 12px; margin-top: 30px; text-align: center;">
-                Este é um email automático do sistema REUNI-O.
+                Este é um email automático do sistema RESERVA.
             </p>
         </div>
     </div>
@@ -84,7 +84,7 @@ export function getBookingCancellationTemplate(props: EmailTemplateProps): strin
             </div>
 
             <p style="color: #666; font-size: 12px; margin-top: 30px; text-align: center;">
-                Este é um email automático do sistema REUNI-O.
+                Este é um email automático do sistema RESERVA.
             </p>
         </div>
     </div>

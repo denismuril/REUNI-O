@@ -286,12 +286,15 @@ export default function HomePage() {
     };
     return (
         <div className="flex h-screen bg-background overflow-hidden relative">
-            {/* Sidebar Desktop */}
             <div className="hidden lg:flex w-[300px] flex-col border-r bg-muted/40 p-4 gap-6 shrink-0 h-full overflow-y-auto">
                 <div className="flex items-center gap-3 px-2">
-                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <CalendarIcon className="h-6 w-6 text-primary" />
-                    </div>
+                    <Image
+                        src="/logo-bexp.jpg"
+                        alt="BEXP"
+                        width={48}
+                        height={48}
+                        className="rounded-lg"
+                    />
                     <div className="flex flex-col justify-center border-l pl-4 h-10 border-border/50">
                         <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground leading-none">Salas de</span>
                         <span className="text-sm font-bold uppercase tracking-widest text-foreground leading-tight">Reunião</span>
@@ -343,10 +346,10 @@ export default function HomePage() {
                         <div className="flex flex-1 items-center justify-end gap-2 md:gap-4">
 
                             {/* Seletor de Filial */}
-                            <div className="hidden sm:flex items-center gap-2">
-                                <Building2 className="h-4 w-4 text-muted-foreground" />
+                            <div className="flex items-center gap-2">
+                                <Building2 className="h-4 w-4 text-muted-foreground hidden sm:block" />
                                 <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                                    <SelectTrigger className="w-[300px] md:w-[450px]">
+                                    <SelectTrigger className="w-[180px] sm:w-[250px] md:w-[350px] text-xs sm:text-sm">
                                         <SelectValue placeholder="Filial" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -360,10 +363,10 @@ export default function HomePage() {
                             </div>
 
                             {/* Seletor de Sala */}
-                            <div className="hidden sm:flex items-center gap-2">
+                            <div className="hidden md:flex items-center gap-2">
                                 <DoorOpen className="h-4 w-4 text-muted-foreground" />
                                 <Select value={selectedRoom} onValueChange={setSelectedRoom}>
-                                    <SelectTrigger className="w-[140px] md:w-[180px]">
+                                    <SelectTrigger className="w-[140px] md:w-[160px] text-xs sm:text-sm">
                                         <SelectValue placeholder="Todas as salas" />
                                     </SelectTrigger>
                                     <SelectContent>
