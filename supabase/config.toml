@@ -19,8 +19,8 @@ max_rows = 1000
 port = 54322
 # Port used by db diff command to initialize the shadow database.
 shadow_port = 54320
-# The database major version to use. Supports 14/15/17.
-major_version = 17
+# The database major version to use. Supports 14/15.
+major_version = 15
 
 [db.pooler]
 enabled = false

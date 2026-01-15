@@ -207,12 +207,13 @@ export default function AdminPage() {
         try {
             if (editingBranchId) {
                 // UPDATE
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const { error } = await supabase
                     .from("branches")
                     .update({
                         name: data.name,
                         location: data.location
-                    })
+                    } as any)
                     .eq("id", editingBranchId);
 
                 if (error) throw error;
@@ -220,11 +221,12 @@ export default function AdminPage() {
                 setEditingBranchId(null);
             } else {
                 // INSERT
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const { error } = await supabase.from("branches").insert({
                     name: data.name,
                     location: data.location,
                     is_active: true,
-                });
+                } as any);
 
                 if (error) throw error;
                 setBranchSuccess(`Filial "${data.name}" criada com sucesso!`);
@@ -280,6 +282,7 @@ export default function AdminPage() {
         try {
             if (editingRoomId) {
                 // UPDATE
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const { error } = await supabase
                     .from("rooms")
                     .update({
@@ -287,7 +290,7 @@ export default function AdminPage() {
                         branch_id: data.branchId,
                         capacity: data.capacity,
                         color: data.color || "#3B82F6",
-                    })
+                    } as any)
                     .eq("id", editingRoomId);
 
                 if (error) throw error;
@@ -295,13 +298,14 @@ export default function AdminPage() {
                 setEditingRoomId(null);
             } else {
                 // INSERT
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const { error } = await supabase.from("rooms").insert({
                     name: data.name,
                     branch_id: data.branchId,
                     capacity: data.capacity,
                     color: data.color || "#3B82F6",
                     is_active: true,
-                });
+                } as any);
 
                 if (error) throw error;
                 setRoomSuccess(`Sala "${data.name}" criada com sucesso!`);

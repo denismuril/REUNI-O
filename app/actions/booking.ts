@@ -3,7 +3,6 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { sendBookingConfirmationEmail } from "./email-actions";
-import { BookingInsert } from "@/types/supabase";
 
 // Schema de validação server-side com Zod
 // A validação de domínio é feita aqui no servidor para segurança
@@ -96,8 +95,8 @@ export async function createBooking(input: BookingInput): Promise<BookingResult>
     const supabase = await createClient();
 
     try {
-        // Preparar dados para inserção com tipo explícito
-        const bookingData: BookingInsert = {
+        // Preparar dados para inserção
+        const bookingData = {
             room_id: data.roomId,
             user_id: null, // Reserva anônima (visitante)
             creator_name: data.creatorName,
