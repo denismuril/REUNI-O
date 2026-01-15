@@ -33,22 +33,17 @@ import {
 import { Branch, Room } from "@/types/supabase";
 import { RecurrenceType, BUSINESS_HOURS } from "@/types/booking";
 import { createClient } from "@/lib/supabase/client";
-import { generateRecurringDates, combineDateAndTime } from "@/lib/utils";
-import { sendBookingConfirmationEmail } from "@/app/actions/email-actions";
+import { combineDateAndTime } from "@/lib/utils";
+import { createBooking } from "@/app/actions/booking";
 
-// Schema de validação com Zod
+// Schema de validação client-side (apenas para UX - validação real é no servidor)
+// Removida validação de domínio pois será feita no backend
 const bookingFormSchema = z
     .object({
         branchId: z.string().min(1, "Selecione uma filial"),
         roomId: z.string().min(1, "Selecione uma sala"),
         creatorName: z.string().min(3, "Informe seu nome completo (mínimo 3 letras)"),
-        creatorEmail: z.string().email("Informe um e-mail válido").refine((email: string) => {
-            const allowedDomain = process.env.NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN;
-            if (!allowedDomain) return true; // Se não configurado, permite qualquer um
-            return email.endsWith(`@${allowedDomain}`);
-        }, {
-            message: `Apenas e-mails do domínio @${process.env.NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN} são permitidos`
-        }),
+        creatorEmail: z.string().email("Informe um e-mail válido"),
         title: z
             .string()
             .min(3, "O título deve ter pelo menos 3 caracteres")
@@ -203,6 +198,7 @@ export function BookingForm({
     }, [selectedStartTime, setValue]);
 
 
+
     const onSubmit = async (data: BookingFormData) => {
         setIsSubmitting(true);
         setError(null);
@@ -213,62 +209,26 @@ export function BookingForm({
             const startDateTime = combineDateAndTime(data.date, data.startTime);
             const endDateTime = combineDateAndTime(data.date, data.endTime);
 
-            // Validação: Não permitir passado
-            if (startDateTime < new Date()) {
-                setError("Não é possível criar reservas no passado.");
-                setIsSubmitting(false);
-                return;
-            }
-
-            // Validação: Término deve ser depois do início
-            if (endDateTime <= startDateTime) {
-                setError("O horário de término deve ser após o horário de início.");
-                setIsSubmitting(false);
-                return;
-            }
-
-
-            // Reserva única
-            const { data: insertedBooking, error } = await supabase.from("bookings").insert({
-                room_id: data.roomId,
-                user_id: null, // Anônimo explícito
-                creator_name: data.creatorName,
-                creator_email: data.creatorEmail,
+            // Chama a Server Action para criar a reserva
+            // A validação completa (incluindo domínio de e-mail) é feita no servidor
+            const result = await createBooking({
+                roomId: data.roomId,
+                creatorName: data.creatorName,
+                creatorEmail: data.creatorEmail,
                 title: data.title,
                 description: data.description,
-                start_time: startDateTime.toISOString(),
-                end_time: endDateTime.toISOString(),
-                is_recurring: false,
-            })
-                .select()
-                .single();
+                startTime: startDateTime.toISOString(),
+                endTime: endDateTime.toISOString(),
+                isRecurring: data.recurrence !== "none",
+                recurrenceType: data.recurrence === "none" ? null : data.recurrence,
+            });
 
-            if (error) {
-                if (error.message.includes("DOUBLE_BOOKING")) {
-                    throw new Error(
-                        "Este horário já está reservado. Por favor, escolha outro horário."
-                    );
-                }
-                throw error;
+            if (!result.success) {
+                setError(result.message || "Erro ao criar reserva");
+                return;
             }
 
             setSuccessMessage("✅ Reserva criada com sucesso!");
-
-            // Enviar email de confirmação (sem bloquear a UI em caso de erro)
-            if (insertedBooking?.id) {
-                const roomName = rooms.find((r: Room) => r.id === data.roomId)?.name || "Sala de Reunião";
-
-                // Dispara em background
-                sendBookingConfirmationEmail({
-                    to: data.creatorEmail,
-                    bookingId: insertedBooking.id,
-                    title: data.title,
-                    roomName: roomName,
-                    startTime: startDateTime.toISOString(),
-                    endTime: endDateTime.toISOString(),
-                    creatorName: data.creatorName
-                }).catch(err => console.error("Falha ao enviar email:", err));
-            }
 
             // Limpa o formulário após sucesso
             reset();

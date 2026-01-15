@@ -53,10 +53,10 @@ export interface CalendarEvent {
     endTime: Date;
     roomId: string;
     roomName: string;
-    userId: string;
+    userId: string | null;
     userName: string;
     userEmail: string;
-    creatorName?: string | null;
+    creatorName: string | null;
     isRecurring: boolean;
     status: 'confirmed' | 'cancelled' | 'pending';
     position?: EventBlockPosition;

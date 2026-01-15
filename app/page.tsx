@@ -17,7 +17,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     Popover,
@@ -30,25 +29,10 @@ import { Database, BookingDetails } from "@/types/supabase";
 import { BookingForm } from "@/components/forms/BookingForm";
 import { DailyView } from "@/components/calendar/DailyView";
 import { WeeklyView } from "@/components/calendar/WeeklyView";
-import { confirmCancellation, requestCancellation } from "./actions/cancel-booking";
+import { BookingDetailsModal, CalendarEvent } from "@/components/modals/BookingDetailsModal";
 
 type Branch = Database["public"]["Tables"]["branches"]["Row"];
 type Room = Database["public"]["Tables"]["rooms"]["Row"];
-type CalendarEvent = {
-    id: string;
-    title: string;
-    description: string | null;
-    startTime: Date;
-    endTime: Date;
-    roomId: string;
-    roomName: string;
-    userId: string | null;
-    userName: string;
-    userEmail: string;
-    creatorName: string | null;
-    isRecurring: boolean;
-    status: "confirmed" | "cancelled" | "pending";
-};
 
 type CalendarViewType = "daily" | "weekly";
 function DailyEventList({ events, currentDate }: { events: CalendarEvent[]; currentDate: Date }) {
@@ -102,13 +86,6 @@ export default function HomePage() {
     const [initialBookingDate, setInitialBookingDate] = useState<Date>();
     const [initialBookingTime, setInitialBookingTime] = useState<string>();
 
-    // Estados Cancelamento
-    const [isCancelling, setIsCancelling] = useState(false);
-    const [cancelStep, setCancelStep] = useState<"email" | "otp">("email");
-    const [cancelEmail, setCancelEmail] = useState("");
-    const [cancelToken, setCancelToken] = useState("");
-    const [cancelError, setCancelError] = useState("");
-    const [isProcessingCancel, setIsProcessingCancel] = useState(false);
 
     const supabase = createClient();
 
@@ -220,53 +197,6 @@ export default function HomePage() {
 
     const handleEventClick = (event: CalendarEvent) => {
         setSelectedEvent(event);
-        setIsCancelling(false); // Resetar ao abrir
-        setCancelEmail("");
-        setCancelError("");
-    };
-
-    const handleStartCancellation = () => {
-        setIsCancelling(true);
-        setCancelStep("email");
-        setCancelError("");
-    };
-
-    const handleRequestToken = async () => {
-        if (!selectedEvent) return;
-        if (!cancelEmail) { setCancelError("Digite o email usado na reserva."); return; }
-
-        setIsProcessingCancel(true);
-        setCancelError("");
-
-        const res = await requestCancellation(selectedEvent.id, cancelEmail);
-        setIsProcessingCancel(false);
-
-        if (res.success) {
-            setCancelStep("otp");
-            setCancelError("");
-        } else {
-            setCancelError(res.message || "Erro ao solicitar código.");
-        }
-    };
-
-    const handleConfirmCancellation = async () => {
-        if (!selectedEvent) return;
-        if (!cancelToken) { setCancelError("Digite o código recebido."); return; }
-
-        setIsProcessingCancel(true);
-        setCancelError("");
-
-        const res = await confirmCancellation(selectedEvent.id, cancelToken);
-        setIsProcessingCancel(false);
-
-        if (res.success) {
-            setSelectedEvent(null);
-            setIsCancelling(false);
-            fetchBookings();
-            // Idealmente exibir um Toast de sucesso, mas vamos fechar por enquanto
-        } else {
-            setCancelError(res.message || "Código inválido.");
-        }
     };
 
     const handleSlotClick = (date: Date) => {
@@ -461,124 +391,13 @@ export default function HomePage() {
                         <a href="/admin" className="hover:text-primary transition-colors">Admin</a>
                     </div>
                 </footer>
-                {/* Modal de Detalhes / Cancelamento (Movido para root level) */}
-                {
-                    selectedEvent && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-                            <div className="bg-card border rounded-lg shadow-lg w-full max-w-md p-6 relative">
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="absolute right-4 top-4"
-                                    onClick={() => setSelectedEvent(null)}
-                                >
-                                    <span className="sr-only">Fechar</span>
-                                    <Plus className="h-4 w-4 rotate-45" />
-                                </Button>
-
-                                {!isCancelling ? (
-                                    // STEP 0: Detalhes
-                                    <div className="space-y-4">
-                                        <div>
-                                            <h3 className="font-semibold text-lg">{selectedEvent.title}</h3>
-                                            <p className="text-sm text-muted-foreground">{selectedEvent.roomName}</p>
-                                        </div>
-                                        <div className="space-y-2 text-sm">
-                                            <div className="flex justify-between py-1 border-b">
-                                                <span className="text-muted-foreground">Data:</span>
-                                                <span className="font-medium">
-                                                    {format(selectedEvent.startTime, "dd/MM/yyyy", { locale: ptBR })}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between py-1 border-b">
-                                                <span className="text-muted-foreground">Horário:</span>
-                                                <span className="font-medium">
-                                                    {format(selectedEvent.startTime, "HH:mm")} - {format(selectedEvent.endTime, "HH:mm")}
-                                                </span>
-                                            </div>
-                                            {selectedEvent.description && (
-                                                <div className="py-1 border-b">
-                                                    <span className="text-muted-foreground block mb-1">Descrição:</span>
-                                                    <p className="whitespace-pre-wrap">{selectedEvent.description}</p>
-                                                </div>
-                                            )}
-                                            <div className="py-1">
-                                                <span className="text-muted-foreground block mb-1">Responsável:</span>
-                                                <span className="font-medium uppercase">{selectedEvent.creatorName || selectedEvent.userName || "Anônimo"}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="pt-4 border-t flex justify-end gap-2">
-                                            <Button variant="outline" onClick={() => setSelectedEvent(null)}>
-                                                Fechar
-                                            </Button>
-                                            <Button variant="destructive" onClick={handleStartCancellation}>
-                                                Cancelar Reserva
-                                            </Button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <h3 className="font-semibold text-lg text-destructive">Cancelar Reserva</h3>
-
-                                        {cancelStep === 'email' ? (
-                                            <div className="space-y-4">
-                                                <p className="text-sm text-muted-foreground">
-                                                    Para segurança, confirme o e-mail utilizado na reserva. Enviaremos um código de validação.
-                                                </p>
-                                                <div className="space-y-2">
-                                                    <Label>Seu E-mail</Label>
-                                                    <Input
-                                                        type="email"
-                                                        placeholder="ex: nome@empresa.com"
-                                                        value={cancelEmail}
-                                                        onChange={(e) => setCancelEmail(e.target.value)}
-                                                    />
-                                                </div>
-                                                {cancelError && <p className="text-xs text-destructive font-medium">{cancelError}</p>}
-                                                <div className="flex justify-end gap-2 pt-2">
-                                                    <Button variant="ghost" onClick={() => setIsCancelling(false)}>Voltar</Button>
-                                                    <Button
-                                                        onClick={handleRequestToken}
-                                                        disabled={isProcessingCancel || !cancelEmail}
-                                                    >
-                                                        {isProcessingCancel ? "Enviando..." : "Enviar Código"}
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-4">
-                                                <p className="text-sm text-muted-foreground">
-                                                    Insira o código enviado para <strong>{cancelEmail}</strong>.
-                                                </p>
-                                                <div className="space-y-2">
-                                                    <Label>Código de Validação</Label>
-                                                    <Input
-                                                        placeholder="000000"
-                                                        value={cancelToken}
-                                                        onChange={(e) => setCancelToken(e.target.value)}
-                                                        maxLength={6}
-                                                    />
-                                                </div>
-                                                {cancelError && <p className="text-xs text-destructive font-medium">{cancelError}</p>}
-                                                <div className="flex justify-end gap-2 pt-2">
-                                                    <Button variant="ghost" onClick={() => setCancelStep('email')}>Voltar</Button>
-                                                    <Button
-                                                        variant="destructive"
-                                                        onClick={handleConfirmCancellation}
-                                                        disabled={isProcessingCancel || !cancelToken}
-                                                    >
-                                                        {isProcessingCancel ? "Cancelando..." : "Confirmar Cancelamento"}
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )
-                }
+                {/* Modal de Detalhes / Cancelamento */}
+                <BookingDetailsModal
+                    event={selectedEvent}
+                    isOpen={selectedEvent !== null}
+                    onClose={() => setSelectedEvent(null)}
+                    onCancelled={fetchBookings}
+                />
             </div >
         </div >
     );
