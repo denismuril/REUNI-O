@@ -80,19 +80,31 @@ export async function adminDeleteBooking(
 
     try {
         // 1. Buscar dados da reserva antes de excluir
-        const { data: booking, error: fetchError } = await supabase
+        const { data: bookingData, error: fetchError } = await supabase
             .from("booking_details")
             .select("id, title, start_time, end_time, room_name, creator_name, creator_email")
             .eq("id", bookingId)
             .single();
 
-        if (fetchError || !booking) {
+        if (fetchError || !bookingData) {
             return { success: false, message: "Reserva não encontrada." };
         }
+
+        // Type assertion para contornar limitação de tipagem do Supabase
+        const booking = bookingData as {
+            id: string;
+            title: string;
+            start_time: string;
+            end_time: string;
+            room_name: string;
+            creator_name: string | null;
+            creator_email: string | null;
+        };
 
         // 2. Registrar no log de auditoria
         const { error: logError } = await supabase
             .from("admin_deletion_logs")
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .insert({
                 booking_id: bookingId,
                 booking_title: booking.title,
@@ -103,7 +115,7 @@ export async function adminDeleteBooking(
                 creator_email: booking.creator_email,
                 deleted_by: deletedBy,
                 deletion_reason: reason || null,
-            });
+            } as any);
 
         if (logError) {
             console.error("Error creating deletion log:", logError);
