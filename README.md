@@ -16,6 +16,7 @@ Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14,
 - **Eventos Recorrentes**: Suporte a repetição diária e semanal
 - **Cancelamento com OTP**: Confirmação segura via email
 - **Hover com Detalhes**: Informações da reserva ao passar o mouse
+- **Reservas de Visitantes**: Suporte seguro para reservas sem login (Guest)
 
 ### Administração
 
@@ -24,11 +25,12 @@ Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14,
 - **Exclusão de Reuniões**: Com auditoria e registro de motivo
 - **Logs de Ações**: Histórico de exclusões administrativas
 
-### Técnico
+### Técnico & Segurança
 
 - **Prevenção de Double Booking**: Validação em nível de banco
-- **RLS (Row Level Security)**: Segurança no nível do banco de dados
-- **Server Actions**: Operações seguras no servidor
+- **RLS (Row Level Security)**: Policies granulares para usuários e visitantes
+- **Server Actions**: Validações de domínio e lógica de negócio no servidor
+- **Zod Validation**: Validação robusta de dados
 
 ## 🛠️ Tech Stack
 
@@ -66,7 +68,7 @@ Acesse: **<http://localhost:3000>**
 | Documento | Descrição |
 |-----------|-----------|
 | [📋 Instalação](docs/INSTALL.md) | Configuração do ambiente local |
-| [🚀 Deploy](docs/DEPLOY.md) | Deploy em servidor Linux |
+| [🐧 Deploy Linux](docs/DEPLOY_LINUX.md) | Guia passo-a-passo para servidor Linux |
 | [🏗️ Arquitetura](docs/ARCHITECTURE.md) | Estrutura e fluxos do sistema |
 
 ## 📁 Estrutura do Projeto
@@ -74,7 +76,7 @@ Acesse: **<http://localhost:3000>**
 ```
 REUNI-O/
 ├── app/                      # Páginas Next.js (App Router)
-│   ├── actions/              # Server Actions
+│   ├── actions/              # Server Actions (Lógica Segura)
 │   ├── admin/                # Painel Administrativo
 │   ├── api/                  # API Routes
 │   ├── auth/                 # Auth Callback
@@ -89,9 +91,9 @@ REUNI-O/
 ├── types/                    # TypeScript Types
 ├── docs/                     # Documentação
 │   ├── INSTALL.md
-│   ├── DEPLOY.md
+│   ├── DEPLOY_LINUX.md
 │   └── ARCHITECTURE.md
-└── supabase/                 # Migrations
+└── supabase/                 # Migrations (RLS, Triggers)
 ```
 
 ## 🔐 Variáveis de Ambiente
@@ -103,6 +105,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 
 # Resend (Email)
 RESEND_API_KEY=re_xxx
+ALLOWED_EMAIL_DOMAIN=suaempresa.com.br
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -124,6 +127,7 @@ admin_deletion_logs (Auditoria)
 - [x] Cancelamento com OTP
 - [x] Painel administrativo
 - [x] Logs de auditoria
+- [x] Suporte a Guest Users
 - [ ] Integração Google Calendar
 - [ ] App mobile (React Native)
 - [ ] Relatórios de utilização
