@@ -44,6 +44,7 @@ export function PeakHoursChart({ data }: PeakHoursChartProps) {
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <Tooltip
+                    // @ts-expect-error - Recharts types are overly strict
                     formatter={(value: number) => [`${value} reservas`, "Reservas"]}
                     labelFormatter={(label) => `Horário: ${label}`}
                     contentStyle={{

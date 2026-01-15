@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     try {
         // 1. Buscar notificações pendentes vencidas
         const now = new Date().toISOString();
-        const { data: notifications, error } = await supabase
+        const { data: notifications, error } = await (supabase
             .from("scheduled_notifications")
             .select(`
                 id,
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
             `)
             .eq("status", "pending")
             .lte("scheduled_for", now)
-            .limit(50); // Processar em lotes
+            .limit(50) as any); // Processar em lotes
 
         if (error) {
             console.error("Erro ao buscar notificações:", error);
@@ -55,15 +55,29 @@ export async function GET(request: Request) {
             failed: 0,
         };
 
+        // Type for notification with booking data
+        type NotificationWithBooking = {
+            id: string;
+            type: string;
+            booking_id: string;
+            bookings: {
+                title: string;
+                room_name: string;
+                start_time: string;
+                end_time: string;
+                creator_name: string;
+                creator_email: string;
+            } | null;
+        };
+
         // 2. Processar cada notificação
-        for (const notification of notifications) {
+        for (const notification of (notifications as NotificationWithBooking[])) {
             stats.processed++;
             const booking = notification.bookings;
 
             // Se a reserva foi deletada ou não encontrada, cancelar notificação
             if (!booking) {
-                await supabase
-                    .from("scheduled_notifications")
+                await (supabase.from("scheduled_notifications") as any)
                     .update({ status: "cancelled", processed_at: new Date().toISOString() })
                     .eq("id", notification.id);
                 continue;
@@ -92,8 +106,7 @@ export async function GET(request: Request) {
                     });
 
                     // Marcar como enviado
-                    await supabase
-                        .from("scheduled_notifications")
+                    await (supabase.from("scheduled_notifications") as any)
                         .update({ status: "sent", processed_at: new Date().toISOString() })
                         .eq("id", notification.id);
 
@@ -101,8 +114,7 @@ export async function GET(request: Request) {
                 } else {
                     // Simular envio em dev sem chave
                     console.log(`[DEV] Email simulado para ${booking.creator_email}`);
-                    await supabase
-                        .from("scheduled_notifications")
+                    await (supabase.from("scheduled_notifications") as any)
                         .update({ status: "sent", processed_at: new Date().toISOString() })
                         .eq("id", notification.id);
 
@@ -111,8 +123,7 @@ export async function GET(request: Request) {
             } catch (err) {
                 console.error(`Erro ao enviar notificação ${notification.id}:`, err);
                 // Marcar como falha
-                await supabase
-                    .from("scheduled_notifications")
+                await (supabase.from("scheduled_notifications") as any)
                     .update({ status: "failed", processed_at: new Date().toISOString() })
                     .eq("id", notification.id);
 

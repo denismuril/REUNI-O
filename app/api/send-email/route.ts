@@ -71,12 +71,17 @@ interface EmailContent {
 
 function generateEmailContent(payload: EmailNotificationPayload): EmailContent {
     const { type, booking, recipientName } = payload;
-    const bookingDate = new Date(booking.start_time).toLocaleDateString("pt-BR");
-    const startTime = new Date(booking.start_time).toLocaleTimeString("pt-BR", {
+
+    // Handle potentially null fields from Supabase view
+    const startTimeStr = booking.start_time || new Date().toISOString();
+    const endTimeStr = booking.end_time || new Date().toISOString();
+
+    const bookingDate = new Date(startTimeStr).toLocaleDateString("pt-BR");
+    const startTime = new Date(startTimeStr).toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
     });
-    const endTime = new Date(booking.end_time).toLocaleTimeString("pt-BR", {
+    const endTime = new Date(endTimeStr).toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
     });

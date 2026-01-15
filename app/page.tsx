@@ -92,11 +92,11 @@ export default function HomePage() {
     // Carrega filiais
     useEffect(() => {
         async function fetchBranches() {
-            const { data } = await supabase
+            const { data } = await (supabase
                 .from("branches")
                 .select("*")
                 .eq("is_active", true)
-                .order("name");
+                .order("name") as any);
 
             if (data) {
                 setBranches(data);
@@ -117,12 +117,12 @@ export default function HomePage() {
                 return;
             }
 
-            const { data } = await supabase
+            const { data } = await (supabase
                 .from("rooms")
                 .select("*")
                 .eq("branch_id", selectedBranch)
                 .eq("is_active", true)
-                .order("name");
+                .order("name") as any);
 
             if (data) {
                 setRooms(data);
@@ -166,21 +166,23 @@ export default function HomePage() {
             const { data, error } = await query;
 
             if (data) {
-                const calendarEvents: CalendarEvent[] = data.map((booking: BookingDetails) => ({
-                    id: booking.id,
-                    title: booking.title,
-                    description: booking.description,
-                    startTime: new Date(booking.start_time),
-                    endTime: new Date(booking.end_time),
-                    roomId: booking.room_id,
-                    roomName: booking.room_name,
-                    userId: booking.user_id,
-                    userName: booking.user_name,
-                    userEmail: booking.user_email,
-                    creatorName: booking.creator_name, // Mapeado novo campo
-                    isRecurring: booking.is_recurring,
-                    status: booking.status as "confirmed" | "cancelled" | "pending",
-                }));
+                const calendarEvents: CalendarEvent[] = data
+                    .filter((booking: BookingDetails) => booking.id && booking.start_time && booking.end_time)
+                    .map((booking: BookingDetails) => ({
+                        id: booking.id!,
+                        title: booking.title || "Sem título",
+                        description: booking.description,
+                        startTime: new Date(booking.start_time!),
+                        endTime: new Date(booking.end_time!),
+                        roomId: booking.room_id || "",
+                        roomName: booking.room_name || "Sala",
+                        userId: booking.user_id,
+                        userName: booking.user_name || "",
+                        userEmail: booking.user_email || "",
+                        creatorName: booking.creator_name,
+                        isRecurring: booking.is_recurring || false,
+                        status: (booking.status || "confirmed") as "confirmed" | "cancelled" | "pending",
+                    }));
 
                 setEvents(calendarEvents);
             }

@@ -38,7 +38,8 @@ export async function logAccess(
     try {
         const supabase = await createClient();
 
-        const { error } = await supabase.from("access_logs").insert({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase.from("access_logs") as any).insert({
             user_email: userEmail,
             action,
             details: details || {},
@@ -70,8 +71,8 @@ export async function getAccessLogs(options?: {
     try {
         const supabase = await createClient();
 
-        let query = supabase
-            .from("access_logs")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let query = (supabase.from("access_logs") as any)
             .select("*")
             .order("created_at", { ascending: false });
 

@@ -48,6 +48,7 @@ export function OccupancyChart({ data }: OccupancyChartProps) {
                     tick={{ fontSize: 12 }}
                 />
                 <Tooltip
+                    // @ts-expect-error - Recharts types are overly strict
                     formatter={(value: number, name: string) => {
                         if (name === "totalBookings") return [`${value} reservas`, "Reservas"];
                         if (name === "totalHours") return [`${value.toFixed(1)}h`, "Horas"];
