@@ -96,39 +96,39 @@ export function WeeklyView({
                 <div className="w-32" /> {/* Spacer para centralizar o título */}
             </div>
 
-            {/* Cabeçalho dos dias */}
-            <div className="flex border-b sticky top-0 bg-background z-10">
-                <div
-                    className="flex-shrink-0 border-r bg-muted/20"
-                    style={{ width: TIME_COLUMN_WIDTH }}
-                />
-                {weekDays.map((day, index) => (
+            {/* Grid do calendário */}
+            <div className="flex-1 overflow-auto relative">
+                {/* Cabeçalho dos dias - Movido para dentro do scroll para alinhar com o corpo e scrollbar */}
+                <div className="flex border-b sticky top-0 bg-background z-20 min-w-fit shadow-sm">
                     <div
-                        key={day.toISOString()}
-                        className={cn(
-                            "flex-1 text-center py-3 border-r last:border-r-0",
-                            isToday(day) && "bg-primary/10",
-                            isWeekend(day) && "bg-muted/30"
-                        )}
-                    >
-                        <div className="text-xs text-muted-foreground uppercase">
-                            {WEEKDAYS_SHORT[day.getDay()]}
-                        </div>
+                        className="flex-shrink-0 border-r bg-muted/30" // Cor ajustada para match com header
+                        style={{ width: TIME_COLUMN_WIDTH }}
+                    />
+                    {weekDays.map((day, index) => (
                         <div
+                            key={day.toISOString()}
                             className={cn(
-                                "text-lg font-semibold",
-                                isToday(day) && "text-primary"
+                                "flex-1 text-center py-3 border-r last:border-r-0 min-w-[120px]", // Adicionado min-w para garantir largura em telas menores
+                                isToday(day) && "bg-primary/5",
+                                isWeekend(day) && "bg-muted/30"
                             )}
                         >
-                            {format(day, "d")}
+                            <div className="text-xs text-muted-foreground uppercase">
+                                {WEEKDAYS_SHORT[day.getDay()]}
+                            </div>
+                            <div
+                                className={cn(
+                                    "text-lg font-semibold",
+                                    isToday(day) && "text-primary"
+                                )}
+                            >
+                                {format(day, "d")}
+                            </div>
                         </div>
-                    </div>
-                ))}
-            </div>
+                    ))}
+                </div>
 
-            {/* Grid do calendário */}
-            <div className="flex-1 overflow-auto">
-                <div className="flex min-h-full">
+                <div className="flex min-h-full min-w-fit">
                     {/* Coluna de horários */}
                     <div
                         className="flex-shrink-0 border-r bg-muted/10"
@@ -138,12 +138,14 @@ export function WeeklyView({
                             <div
                                 key={slot.label}
                                 className={cn(
-                                    "text-xs text-muted-foreground text-right pr-2 border-b",
-                                    slot.minute === 0 && "font-medium"
+                                    "text-xs text-muted-foreground text-right pr-2 border-b flex items-center justify-end font-mono",
+                                    slot.minute === 0 && "font-medium text-foreground"
                                 )}
                                 style={{ height: SLOT_HEIGHT }}
                             >
-                                {slot.minute === 0 && slot.label}
+                                <span className={cn("-translate-y-1/2", slot.minute === 30 && "hidden")}>
+                                    {slot.label}
+                                </span>
                             </div>
                         ))}
                     </div>
