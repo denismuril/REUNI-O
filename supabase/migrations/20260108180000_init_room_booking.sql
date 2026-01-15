@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. PROFILES TABLE
 -- Links to auth.users and stores user information
 -- ============================================================
-CREATE TABLE public.profiles (
+CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
     email TEXT NOT NULL,
@@ -21,18 +21,20 @@ CREATE TABLE public.profiles (
 );
 
 -- Create index for faster queries
-CREATE INDEX idx_profiles_role ON public.profiles(role);
+CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- Profiles RLS Policies
+DROP POLICY IF EXISTS "Profiles are viewable by authenticated users" ON public.profiles;
 CREATE POLICY "Profiles are viewable by authenticated users"
     ON public.profiles
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
     ON public.profiles
     FOR UPDATE
@@ -40,6 +42,7 @@ CREATE POLICY "Users can update their own profile"
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Admins can update any profile" ON public.profiles;
 CREATE POLICY "Admins can update any profile"
     ON public.profiles
     FOR UPDATE
@@ -60,11 +63,13 @@ BEGIN
         NEW.id,
         COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
         NEW.email
-    );
+    )
+    ON CONFLICT (id) DO NOTHING;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW
@@ -74,7 +79,7 @@ CREATE TRIGGER on_auth_user_created
 -- 2. BRANCHES TABLE
 -- Company locations/offices
 -- ============================================================
-CREATE TABLE public.branches (
+CREATE TABLE IF NOT EXISTS public.branches (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name TEXT NOT NULL,
     location TEXT NOT NULL,
@@ -89,12 +94,14 @@ CREATE TABLE public.branches (
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 
 -- Branches RLS Policies
+DROP POLICY IF EXISTS "Branches are viewable by authenticated users" ON public.branches;
 CREATE POLICY "Branches are viewable by authenticated users"
     ON public.branches
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Only admins can insert branches" ON public.branches;
 CREATE POLICY "Only admins can insert branches"
     ON public.branches
     FOR INSERT
@@ -106,6 +113,7 @@ CREATE POLICY "Only admins can insert branches"
         )
     );
 
+DROP POLICY IF EXISTS "Only admins can update branches" ON public.branches;
 CREATE POLICY "Only admins can update branches"
     ON public.branches
     FOR UPDATE
@@ -117,6 +125,7 @@ CREATE POLICY "Only admins can update branches"
         )
     );
 
+DROP POLICY IF EXISTS "Only admins can delete branches" ON public.branches;
 CREATE POLICY "Only admins can delete branches"
     ON public.branches
     FOR DELETE
@@ -132,7 +141,7 @@ CREATE POLICY "Only admins can delete branches"
 -- 3. ROOMS TABLE
 -- Meeting rooms within branches
 -- ============================================================
-CREATE TABLE public.rooms (
+CREATE TABLE IF NOT EXISTS public.rooms (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     branch_id UUID NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -147,19 +156,21 @@ CREATE TABLE public.rooms (
 );
 
 -- Create indexes
-CREATE INDEX idx_rooms_branch ON public.rooms(branch_id);
-CREATE INDEX idx_rooms_capacity ON public.rooms(capacity);
+CREATE INDEX IF NOT EXISTS idx_rooms_branch ON public.rooms(branch_id);
+CREATE INDEX IF NOT EXISTS idx_rooms_capacity ON public.rooms(capacity);
 
 -- Enable RLS
 ALTER TABLE public.rooms ENABLE ROW LEVEL SECURITY;
 
 -- Rooms RLS Policies
+DROP POLICY IF EXISTS "Rooms are viewable by authenticated users" ON public.rooms;
 CREATE POLICY "Rooms are viewable by authenticated users"
     ON public.rooms
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Only admins can insert rooms" ON public.rooms;
 CREATE POLICY "Only admins can insert rooms"
     ON public.rooms
     FOR INSERT
@@ -171,6 +182,7 @@ CREATE POLICY "Only admins can insert rooms"
         )
     );
 
+DROP POLICY IF EXISTS "Only admins can update rooms" ON public.rooms;
 CREATE POLICY "Only admins can update rooms"
     ON public.rooms
     FOR UPDATE
@@ -182,6 +194,7 @@ CREATE POLICY "Only admins can update rooms"
         )
     );
 
+DROP POLICY IF EXISTS "Only admins can delete rooms" ON public.rooms;
 CREATE POLICY "Only admins can delete rooms"
     ON public.rooms
     FOR DELETE
@@ -197,7 +210,7 @@ CREATE POLICY "Only admins can delete rooms"
 -- 4. BOOKINGS TABLE
 -- Room reservations with recurring event support
 -- ============================================================
-CREATE TABLE public.bookings (
+CREATE TABLE IF NOT EXISTS public.bookings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     room_id UUID NOT NULL REFERENCES public.rooms(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -219,34 +232,38 @@ CREATE TABLE public.bookings (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_bookings_room ON public.bookings(room_id);
-CREATE INDEX idx_bookings_user ON public.bookings(user_id);
-CREATE INDEX idx_bookings_time ON public.bookings(start_time, end_time);
-CREATE INDEX idx_bookings_parent ON public.bookings(parent_booking_id);
-CREATE INDEX idx_bookings_status ON public.bookings(status);
+CREATE INDEX IF NOT EXISTS idx_bookings_room ON public.bookings(room_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_user ON public.bookings(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_time ON public.bookings(start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_bookings_parent ON public.bookings(parent_booking_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_status ON public.bookings(status);
 
 -- Enable RLS
 ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 
 -- Bookings RLS Policies
+DROP POLICY IF EXISTS "Bookings are viewable by authenticated users" ON public.bookings;
 CREATE POLICY "Bookings are viewable by authenticated users"
     ON public.bookings
     FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Authenticated users can insert bookings" ON public.bookings;
 CREATE POLICY "Authenticated users can insert bookings"
     ON public.bookings
     FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update their own bookings" ON public.bookings;
 CREATE POLICY "Users can update their own bookings"
     ON public.bookings
     FOR UPDATE
     TO authenticated
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Admins can update any booking" ON public.bookings;
 CREATE POLICY "Admins can update any booking"
     ON public.bookings
     FOR UPDATE
@@ -258,12 +275,14 @@ CREATE POLICY "Admins can update any booking"
         )
     );
 
+DROP POLICY IF EXISTS "Users can delete their own bookings" ON public.bookings;
 CREATE POLICY "Users can delete their own bookings"
     ON public.bookings
     FOR DELETE
     TO authenticated
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Admins can delete any booking" ON public.bookings;
 CREATE POLICY "Admins can delete any booking"
     ON public.bookings
     FOR DELETE
@@ -330,6 +349,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS check_booking_availability ON public.bookings;
 CREATE TRIGGER check_booking_availability
     BEFORE INSERT OR UPDATE ON public.bookings
     FOR EACH ROW
@@ -425,47 +445,36 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Apply updated_at triggers to all tables
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
 CREATE TRIGGER update_profiles_updated_at
     BEFORE UPDATE ON public.profiles
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_branches_updated_at ON public.branches;
 CREATE TRIGGER update_branches_updated_at
     BEFORE UPDATE ON public.branches
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_rooms_updated_at ON public.rooms;
 CREATE TRIGGER update_rooms_updated_at
     BEFORE UPDATE ON public.rooms
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_bookings_updated_at ON public.bookings;
 CREATE TRIGGER update_bookings_updated_at
     BEFORE UPDATE ON public.bookings
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ============================================================
--- 9. SEED DATA (Optional - for development)
--- ============================================================
--- Uncomment the following to seed initial data
-
-/*
--- Insert sample branches
-INSERT INTO public.branches (name, location, address, timezone) VALUES
-    ('Headquarters', 'São Paulo', 'Av. Paulista, 1000', 'America/Sao_Paulo'),
-    ('Tech Hub', 'Rio de Janeiro', 'Av. Rio Branco, 500', 'America/Sao_Paulo'),
-    ('Innovation Center', 'Belo Horizonte', 'Rua da Bahia, 200', 'America/Sao_Paulo');
-
--- Insert sample rooms (you'll need to replace branch_id with actual UUIDs)
--- This can be done after branches are inserted
-*/
-
--- ============================================================
 -- 10. HELPER VIEWS
 -- ============================================================
 
 -- View for booking details with user and room info
+DROP VIEW IF EXISTS public.booking_details;
 CREATE OR REPLACE VIEW public.booking_details AS
 SELECT 
     b.id,

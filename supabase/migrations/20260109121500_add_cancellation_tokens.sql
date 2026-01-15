@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS public.cancellation_tokens (
 ALTER TABLE public.cancellation_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Bloquear acesso direto (tudo via func)
+DROP POLICY IF EXISTS "No public access" ON public.cancellation_tokens;
 CREATE POLICY "No public access" ON public.cancellation_tokens
     FOR ALL
     TO public
