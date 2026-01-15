@@ -25,7 +25,8 @@ export async function requestCancellation(bookingId: string, email: string) {
     const supabase = await createClient();
 
     try {
-        const { data: token, error } = await supabase.rpc('request_cancellation_token', {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: token, error } = await (supabase.rpc as any)('request_cancellation_token', {
             p_booking_id: bookingId,
             p_email: email
         });
@@ -84,7 +85,8 @@ export async function confirmCancellation(bookingId: string, token: string) {
     const supabase = await createClient();
 
     try {
-        const { data: success, error } = await supabase.rpc('confirm_cancellation', {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: success, error } = await (supabase.rpc as any)('confirm_cancellation', {
             p_booking_id: bookingId,
             p_token: token
         });

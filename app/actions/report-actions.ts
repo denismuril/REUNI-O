@@ -32,6 +32,19 @@ export interface MonthlyStats {
     peakDay: string;
 }
 
+// Type helper para resultados de queries do Supabase
+interface BookingDetailRow {
+    room_id: string;
+    room_name: string;
+    branch_name: string;
+    room_color: string | null;
+    start_time: string;
+    end_time: string;
+    creator_email: string | null;
+    creator_name: string | null;
+    status: string;
+}
+
 /**
  * Busca estatísticas de ocupação por sala
  */
@@ -55,8 +68,9 @@ export async function getOccupancyByRoom(
 
         // Agrupar por sala
         const roomStats = new Map<string, OccupancyStats>();
+        const bookingList = (bookings || []) as BookingDetailRow[];
 
-        bookings?.forEach((booking) => {
+        bookingList.forEach((booking) => {
             const roomId = booking.room_id;
             const hours =
                 (new Date(booking.end_time).getTime() -
@@ -117,7 +131,9 @@ export async function getPeakHours(
             hourCounts.set(h, 0);
         }
 
-        bookings?.forEach((booking) => {
+        const bookingList = (bookings || []) as { start_time: string }[];
+
+        bookingList.forEach((booking) => {
             const hour = new Date(booking.start_time).getHours();
             if (hourCounts.has(hour)) {
                 hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
@@ -160,8 +176,9 @@ export async function getTopUsers(
 
         // Agrupar por usuário
         const userStats = new Map<string, TopUserStats>();
+        const bookingList = (bookings || []) as { creator_email: string | null; creator_name: string | null; start_time: string; end_time: string }[];
 
-        bookings?.forEach((booking) => {
+        bookingList.forEach((booking) => {
             const email = booking.creator_email || "Desconhecido";
             const hours =
                 (new Date(booking.end_time).getTime() -
@@ -235,8 +252,9 @@ export async function getMonthlyStats(
         let totalHours = 0;
         const roomCounts = new Map<string, number>();
         const dayCounts = new Map<string, number>();
+        const bookingList = (bookings || []) as { room_name: string; start_time: string; end_time: string }[];
 
-        bookings.forEach((booking) => {
+        bookingList.forEach((booking) => {
             const hours =
                 (new Date(booking.end_time).getTime() -
                     new Date(booking.start_time).getTime()) /
