@@ -1,16 +1,26 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { Resend } from "resend";
-import { isRateLimited, recordAttempt, clearRateLimit } from "@/lib/rate-limit";
+import { isRateLimited, recordAttempt } from "@/lib/rate-limit";
 
-// Inicializa Resend com chave real ou valor dummy para evitar erro no construtor
+// Inicializa Resend
 const resend = new Resend(process.env.RESEND_API_KEY || "re_123");
 
+/**
+ * Gera um token OTP de 6 dígitos
+ */
+function generateOTP(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+/**
+ * Solicita cancelamento de uma reserva (gera e envia OTP)
+ */
 export async function requestCancellation(bookingId: string, email: string) {
     // Verificar rate limiting (3 tentativas por email em 15 minutos)
     const rateLimitKey = `otp_request:${email.toLowerCase()}`;
-    const { limited, remainingAttempts, resetIn } = isRateLimited(rateLimitKey);
+    const { limited, resetIn } = isRateLimited(rateLimitKey);
 
     if (limited) {
         return {
@@ -19,31 +29,42 @@ export async function requestCancellation(bookingId: string, email: string) {
         };
     }
 
-    // Registrar tentativa
     recordAttempt(rateLimitKey);
 
-    const supabase = await createClient();
-
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: token, error } = await (supabase.rpc as any)('request_cancellation_token', {
-            p_booking_id: bookingId,
-            p_email: email
+        // Verificar se a reserva existe e pertence ao email
+        const booking = await prisma.booking.findUnique({
+            where: { id: bookingId },
+            select: { id: true, creatorEmail: true },
         });
 
-        if (error) {
-            console.error("RPC Error (request):", error);
-            if (error.message.includes("Email") || error.message.includes("inválido")) {
-                return { success: false, message: "E-mail não corresponde à reserva." };
-            }
-            return { success: false, message: "Erro ao gerar código de cancelamento." };
+        if (!booking) {
+            return { success: false, message: "Reserva não encontrada." };
         }
 
-        if (!token) {
-            return { success: false, message: "Erro interno: Token não gerado." };
+        // Normalizar e comparar emails
+        if (booking.creatorEmail.toLowerCase().trim() !== email.toLowerCase().trim()) {
+            return { success: false, message: "E-mail não corresponde à reserva." };
         }
 
-        // Enviar Email se houver chave configurada
+        // Gerar OTP
+        const token = generateOTP();
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+
+        // Limpar tokens antigos e criar novo
+        await prisma.cancellationToken.deleteMany({
+            where: { bookingId },
+        });
+
+        await prisma.cancellationToken.create({
+            data: {
+                bookingId,
+                token,
+                expiresAt,
+            },
+        });
+
+        // Enviar Email
         if (process.env.RESEND_API_KEY) {
             try {
                 await resend.emails.send({
@@ -66,7 +87,7 @@ export async function requestCancellation(bookingId: string, email: string) {
                 return { success: false, message: "Erro ao enviar e-mail. Tente novamente." };
             }
         } else {
-            // Fallback para desenvolvimento sem chave
+            // Fallback para desenvolvimento
             console.log("========================================");
             console.log(`[MOCK EMAIL] Para: ${email}`);
             console.log(`[MOCK EMAIL] Token: ${token}`);
@@ -81,24 +102,28 @@ export async function requestCancellation(bookingId: string, email: string) {
     }
 }
 
+/**
+ * Confirma o cancelamento de uma reserva com o OTP
+ */
 export async function confirmCancellation(bookingId: string, token: string) {
-    const supabase = await createClient();
-
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: success, error } = await (supabase.rpc as any)('confirm_cancellation', {
-            p_booking_id: bookingId,
-            p_token: token
+        // Verificar token
+        const cancellationToken = await prisma.cancellationToken.findFirst({
+            where: {
+                bookingId,
+                token,
+                expiresAt: { gt: new Date() },
+            },
         });
 
-        if (error) {
-            console.error("RPC Error (confirm):", error);
-            return { success: false, message: "Erro ao confirmar cancelamento." };
-        }
-
-        if (!success) {
+        if (!cancellationToken) {
             return { success: false, message: "Código inválido ou expirado." };
         }
+
+        // Deletar a reserva (cascade deleta o token)
+        await prisma.booking.delete({
+            where: { id: bookingId },
+        });
 
         return { success: true };
     } catch (e) {

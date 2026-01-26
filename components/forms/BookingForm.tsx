@@ -30,14 +30,24 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 
-import { Branch, Room } from "@/types/supabase";
-import { RecurrenceType, BUSINESS_HOURS } from "@/types/booking";
-import { createClient } from "@/lib/supabase/client";
+import { BUSINESS_HOURS } from "@/types/booking";
 import { combineDateAndTime } from "@/lib/utils";
-import { createBooking } from "@/app/actions/booking";
+import { createBooking, getBranches, getRoomsByBranch } from "@/app/actions/booking";
 
-// Schema de validação client-side (apenas para UX - validação real é no servidor)
-// Removida validação de domínio pois será feita no backend
+// Tipos locais para branch e room (vindo das server actions)
+type Branch = {
+    id: string;
+    name: string;
+    location: string;
+};
+
+type Room = {
+    id: string;
+    name: string;
+    capacity: number;
+};
+
+// Schema de validação client-side
 const bookingFormSchema = z
     .object({
         branchId: z.string().min(1, "Selecione uma filial"),
@@ -52,7 +62,9 @@ const bookingFormSchema = z
         date: z.date({ required_error: "Selecione uma data" }),
         startTime: z.string().min(1, "Selecione o horário de início"),
         endTime: z.string().min(1, "Selecione o horário de término"),
-        recurrence: z.enum(["none", "daily", "weekly"]),
+        recurrence: z.enum(["none", "daily", "weekly", "monthly", "custom"]),
+        recurrenceEndDate: z.date().optional(),
+        selectedDaysOfWeek: z.array(z.number()).optional(),
     })
     .refine(
         (data) => {
@@ -63,6 +75,30 @@ const bookingFormSchema = z
         {
             message: "O horário de término deve ser após o horário de início",
             path: ["endTime"],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.recurrence === "custom" && (!data.selectedDaysOfWeek || data.selectedDaysOfWeek.length === 0)) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message: "Selecione pelo menos um dia da semana",
+            path: ["selectedDaysOfWeek"],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.recurrence !== "none" && !data.recurrenceEndDate) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message: "Selecione a data final da recorrência",
+            path: ["recurrenceEndDate"],
         }
     );
 
@@ -106,7 +142,6 @@ export function BookingForm({
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
     const timeOptions = generateTimeOptions();
-    const supabase = createClient();
 
     const {
         register,
@@ -135,25 +170,17 @@ export function BookingForm({
     const selectedBranchId = watch("branchId");
     const selectedRecurrence = watch("recurrence");
     const selectedStartTime = watch("startTime");
-    const selectedEndTime = watch("endTime");
 
-    // Carrega filiais ao montar o componente
+    // Carrega filiais ao montar o componente via server action
     useEffect(() => {
         async function fetchBranches() {
-            const { data, error } = await supabase
-                .from("branches")
-                .select("*")
-                .eq("is_active", true)
-                .order("name");
-
-            if (data) {
-                setBranches(data);
-            }
+            const data = await getBranches();
+            setBranches(data as Branch[]);
         }
         fetchBranches();
     }, []);
 
-    // Carrega salas quando uma filial é selecionada
+    // Carrega salas quando uma filial é selecionada via server action
     useEffect(() => {
         async function fetchRooms() {
             if (!selectedBranchId) {
@@ -161,43 +188,23 @@ export function BookingForm({
                 return;
             }
 
-            const { data, error } = await supabase
-                .from("rooms")
-                .select("*")
-                .eq("branch_id", selectedBranchId)
-                .eq("is_active", true)
-                .order("name");
-
-            if (data) {
-                setRooms(data);
-                setValue("roomId", ""); // Reset room selection
-            }
+            const data = await getRoomsByBranch(selectedBranchId);
+            setRooms(data as Room[]);
+            setValue("roomId", "");
         }
         fetchRooms();
     }, [selectedBranchId, setValue]);
 
-    // Atualiza endTime automaticamente quando startTime muda (gera duração padrão de 1h)
+    // Atualiza endTime automaticamente quando startTime muda
     useEffect(() => {
         if (!selectedStartTime) return;
 
         const [hours, minutes] = selectedStartTime.split(':').map(Number);
-        // Adiciona 1 hora por padrão
         let endHours = hours + 1;
 
-        // Formata para HH:mm
         const formattedEnd = `${String(endHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-
-        // Se o horário final calculado for menor ou igual ao inicial (ex: virada de dia) ou inválido, ignora
-        // Mas aqui assume-se dia comercial simples.
-
-        // Verifica se o novo endTime proposto é diferente do atual para evitar loop se o usuário mudou o endTime manualmente para outro valor valido?
-        // Na verdade, queremos forçar a mudança se o startTime mudar.
-        // Mas se o usuário mudar o endTime e depois o startTime, o endTime reseta. Isso é o comportamento esperado "inteligente".
-
         setValue("endTime", formattedEnd);
     }, [selectedStartTime, setValue]);
-
-
 
     const onSubmit = async (data: BookingFormData) => {
         setIsSubmitting(true);
@@ -205,12 +212,13 @@ export function BookingForm({
         setSuccessMessage(null);
 
         try {
-            // Combina data e horários
             const startDateTime = combineDateAndTime(data.date, data.startTime);
             const endDateTime = combineDateAndTime(data.date, data.endTime);
 
-            // Chama a Server Action para criar a reserva
-            // A validação completa (incluindo domínio de e-mail) é feita no servidor
+            // Se for custom, garante que selectedDaysOfWeek está preenchido
+            const recurrenceDays = data.recurrence === 'custom' ? data.selectedDaysOfWeek : undefined;
+            const recurrenceEnd = data.recurrenceEndDate;
+
             const result = await createBooking({
                 roomId: data.roomId,
                 creatorName: data.creatorName,
@@ -221,6 +229,8 @@ export function BookingForm({
                 endTime: endDateTime.toISOString(),
                 isRecurring: data.recurrence !== "none",
                 recurrenceType: data.recurrence === "none" ? null : data.recurrence,
+                recurrenceEndDate: recurrenceEnd ? recurrenceEnd.toISOString() : undefined,
+                selectedDaysOfWeek: recurrenceDays,
             });
 
             if (!result.success) {
@@ -229,8 +239,6 @@ export function BookingForm({
             }
 
             setSuccessMessage("✅ Reserva criada com sucesso!");
-
-            // Limpa o formulário após sucesso
             reset();
             onSuccess?.();
 
@@ -452,29 +460,93 @@ export function BookingForm({
                     </div>
 
                     {/* Recorrência */}
-                    <div className="space-y-3">
-                        <Label>Recorrência</Label>
-                        <Controller
-                            name="recurrence"
-                            control={control}
-                            render={({ field }) => (
-                                <Select value={field.value} onValueChange={field.onChange}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="none">Não repetir</SelectItem>
-                                        <SelectItem value="daily">Diariamente (3 meses)</SelectItem>
-                                        <SelectItem value="weekly">Semanalmente (3 meses)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            )}
-                        />
+                    <div className="space-y-4 pt-2 border-t">
+                        <div className="space-y-2">
+                            <Label>Recorrência</Label>
+                            <Controller
+                                name="recurrence"
+                                control={control}
+                                render={({ field }) => (
+                                    <Select value={field.value} onValueChange={field.onChange}>
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">Não repetir</SelectItem>
+                                            <SelectItem value="daily">Diariamente</SelectItem>
+                                            <SelectItem value="weekly">Semanalmente</SelectItem>
+                                            <SelectItem value="monthly">Mensalmente</SelectItem>
+                                            <SelectItem value="custom">Personalizado (Dias da Semana)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                )}
+                            />
+                        </div>
+
                         {selectedRecurrence !== "none" && (
-                            <p className="text-xs text-muted-foreground">
-                                ⚡ As reservas serão criadas automaticamente para os próximos 3
-                                meses
-                            </p>
+                            <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
+                                <div className="space-y-2">
+                                    <Label>Repetir até:</Label>
+                                    <Controller
+                                        name="recurrenceEndDate"
+                                        control={control}
+                                        render={({ field }) => (
+                                            <DatePicker
+                                                date={field.value}
+                                                onSelect={(date) => field.onChange(date)}
+                                                placeholder="Selecione a data final"
+                                                minDate={new Date()}
+                                            />
+                                        )}
+                                    />
+                                    {errors.recurrenceEndDate && (
+                                        <p className="text-sm text-destructive">{errors.recurrenceEndDate.message}</p>
+                                    )}
+                                </div>
+
+                                {selectedRecurrence === "custom" && (
+                                    <div className="space-y-2">
+                                        <Label>Dias da Semana:</Label>
+                                        <Controller
+                                            name="selectedDaysOfWeek"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, index) => {
+                                                        const isSelected = field.value?.includes(index);
+                                                        return (
+                                                            <Button
+                                                                key={index}
+                                                                type="button"
+                                                                variant={isSelected ? "default" : "outline"}
+                                                                size="sm"
+                                                                className={`w-10 h-10 p-0 ${isSelected ? 'bg-primary text-primary-foreground' : ''}`}
+                                                                onClick={() => {
+                                                                    const current = field.value || [];
+                                                                    const updated = current.includes(index)
+                                                                        ? current.filter(d => d !== index)
+                                                                        : [...current, index];
+                                                                    field.onChange(updated);
+                                                                }}
+                                                            >
+                                                                {day}
+                                                            </Button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        />
+                                        {errors.selectedDaysOfWeek && (
+                                            <p className="text-sm text-destructive">{errors.selectedDaysOfWeek.message}</p>
+                                        )}
+                                    </div>
+                                )}
+
+                                <p className="text-xs text-muted-foreground">
+                                    ⚡ A reserva principal será criada na data selecionada acima.<br />
+                                    As recorrências serão geradas a partir do dia seguinte até a data final.
+                                </p>
+                            </div>
                         )}
                     </div>
                 </CardContent>

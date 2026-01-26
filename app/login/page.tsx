@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Calendar, Mail, Lock, Loader2 } from "lucide-react";
+import { signIn } from "next-auth/react";
+import { Calendar, Mail, Lock, Loader2, User } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,18 +17,16 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 
-import { createClient } from "@/lib/supabase/client";
-
 export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [fullName, setFullName] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
     const router = useRouter();
-    const supabase = createClient();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -37,25 +36,50 @@ export default function LoginPage() {
 
         try {
             if (isSignUp) {
-                // Cadastro
-                const { error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        emailRedirectTo: `${window.location.origin}/auth/callback`,
-                    },
+                // Cadastro via API
+                const res = await fetch("/api/auth/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email: email.toLowerCase().trim(),
+                        password,
+                        fullName: fullName.trim(),
+                    }),
                 });
 
-                if (error) throw error;
-                setMessage("Verifique seu email para confirmar o cadastro.");
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || "Erro ao criar conta");
+                }
+
+                setMessage("Conta criada com sucesso! Fazendo login...");
+
+                // Auto-login após cadastro
+                const result = await signIn("credentials", {
+                    email: email.toLowerCase().trim(),
+                    password,
+                    redirect: false,
+                });
+
+                if (result?.error) {
+                    throw new Error(result.error);
+                }
+
+                router.push("/");
+                router.refresh();
             } else {
-                // Login
-                const { error } = await supabase.auth.signInWithPassword({
-                    email,
+                // Login via NextAuth
+                const result = await signIn("credentials", {
+                    email: email.toLowerCase().trim(),
                     password,
+                    redirect: false,
                 });
 
-                if (error) throw error;
+                if (result?.error) {
+                    throw new Error("Email ou senha incorretos");
+                }
+
                 router.push("/");
                 router.refresh();
             }
@@ -100,6 +124,25 @@ export default function LoginPage() {
                         {message && (
                             <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-emerald-600 text-sm">
                                 {message}
+                            </div>
+                        )}
+
+                        {/* Nome (apenas no cadastro) */}
+                        {isSignUp && (
+                            <div className="space-y-2">
+                                <Label htmlFor="fullName">Nome Completo</Label>
+                                <div className="relative">
+                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        id="fullName"
+                                        type="text"
+                                        placeholder="Seu nome completo"
+                                        value={fullName}
+                                        onChange={(e) => setFullName(e.target.value)}
+                                        className="pl-10"
+                                        required={isSignUp}
+                                    />
+                                </div>
                             </div>
                         )}
 

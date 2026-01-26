@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 
 export interface AdminDeletionResult {
     success: boolean;
@@ -32,110 +32,144 @@ export interface DeletionLog {
  * Busca todas as reservas futuras para o painel admin
  */
 export async function getBookingsForAdmin(): Promise<BookingForAdmin[]> {
-    const supabase = await createClient();
+    const bookings = await prisma.booking.findMany({
+        where: {
+            startTime: { gte: new Date() },
+        },
+        include: {
+            room: true,
+        },
+        orderBy: { startTime: "asc" },
+    });
 
-    const { data, error } = await supabase
-        .from("booking_details")
-        .select("id, title, start_time, end_time, room_name, creator_name, creator_email, status")
-        .gte("start_time", new Date().toISOString())
-        .order("start_time", { ascending: true });
-
-    if (error) {
-        console.error("Error fetching bookings for admin:", error);
-        return [];
-    }
-
-    return data || [];
+    return bookings.map((b) => ({
+        id: b.id,
+        title: b.title,
+        start_time: b.startTime.toISOString(),
+        end_time: b.endTime.toISOString(),
+        room_name: b.room.name,
+        creator_name: b.creatorName,
+        creator_email: b.creatorEmail,
+        status: b.status.toLowerCase(),
+    }));
 }
 
 /**
  * Busca os logs de exclusão administrativa
+ * Nota: A tabela admin_deletion_logs precisa ser criada se você quiser manter este recurso
  */
 export async function getDeletionLogs(): Promise<DeletionLog[]> {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-        .from("admin_deletion_logs")
-        .select("id, booking_title, booking_start_time, room_name, deleted_by, deletion_reason, deleted_at")
-        .order("deleted_at", { ascending: false })
-        .limit(50);
-
-    if (error) {
-        console.error("Error fetching deletion logs:", error);
-        return [];
-    }
-
-    return data || [];
+    // TODO: Implementar tabela AdminDeletionLog no schema se necessário
+    // Por enquanto retorna array vazio
+    return [];
 }
 
 /**
- * Exclui uma reserva e registra o log de auditoria
+ * Exclui uma reserva diretamente (admin)
  */
 export async function adminDeleteBooking(
     bookingId: string,
     deletedBy: string,
     reason?: string
 ): Promise<AdminDeletionResult> {
-    const supabase = await createClient();
-
     try {
-        // 1. Buscar dados da reserva antes de excluir
-        const { data: bookingData, error: fetchError } = await supabase
-            .from("booking_details")
-            .select("id, title, start_time, end_time, room_name, creator_name, creator_email")
-            .eq("id", bookingId)
-            .single();
+        // Buscar dados da reserva
+        const booking = await prisma.booking.findUnique({
+            where: { id: bookingId },
+            include: { room: true },
+        });
 
-        if (fetchError || !bookingData) {
+        if (!booking) {
             return { success: false, message: "Reserva não encontrada." };
         }
 
-        // Type assertion para contornar limitação de tipagem do Supabase
-        const booking = bookingData as {
-            id: string;
-            title: string;
-            start_time: string;
-            end_time: string;
-            room_name: string;
-            creator_name: string | null;
-            creator_email: string | null;
-        };
+        // TODO: Se precisar de log de auditoria, criar tabela AdminDeletionLog
+        // Por enquanto apenas deleta
+        console.log(`[ADMIN DELETE] Reserva ${bookingId} deletada por ${deletedBy}. Motivo: ${reason || "N/A"}`);
 
-        // 2. Registrar no log de auditoria
-        const { error: logError } = await supabase
-            .from("admin_deletion_logs")
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .insert({
-                booking_id: bookingId,
-                booking_title: booking.title,
-                booking_start_time: booking.start_time,
-                booking_end_time: booking.end_time,
-                room_name: booking.room_name,
-                creator_name: booking.creator_name,
-                creator_email: booking.creator_email,
-                deleted_by: deletedBy,
-                deletion_reason: reason || null,
-            } as any);
-
-        if (logError) {
-            console.error("Error creating deletion log:", logError);
-            return { success: false, message: "Erro ao registrar log de exclusão." };
-        }
-
-        // 3. Excluir a reserva
-        const { error: deleteError } = await supabase
-            .from("bookings")
-            .delete()
-            .eq("id", bookingId);
-
-        if (deleteError) {
-            console.error("Error deleting booking:", deleteError);
-            return { success: false, message: "Erro ao excluir reserva." };
-        }
+        // Deletar a reserva
+        await prisma.booking.delete({
+            where: { id: bookingId },
+        });
 
         return { success: true };
     } catch (e) {
         console.error("Admin delete error:", e);
         return { success: false, message: "Erro inesperado ao excluir reserva." };
     }
+}
+
+/**
+ * Cria uma nova filial
+ */
+export async function createBranch(data: {
+    name: string;
+    location: string;
+    address?: string;
+    timezone?: string;
+}) {
+    return prisma.branch.create({
+        data: {
+            name: data.name,
+            location: data.location,
+            address: data.address,
+            timezone: data.timezone || "America/Sao_Paulo",
+        },
+    });
+}
+
+/**
+ * Atualiza uma filial
+ */
+export async function updateBranch(id: string, data: {
+    name?: string;
+    location?: string;
+    address?: string;
+    timezone?: string;
+    isActive?: boolean;
+}) {
+    return prisma.branch.update({
+        where: { id },
+        data,
+    });
+}
+
+/**
+ * Cria uma nova sala
+ */
+export async function createRoom(data: {
+    branchId: string;
+    name: string;
+    capacity: number;
+    description?: string;
+    floor?: string;
+    equipmentList?: string[];
+}) {
+    return prisma.room.create({
+        data: {
+            branchId: data.branchId,
+            name: data.name,
+            capacity: data.capacity,
+            description: data.description,
+            floor: data.floor,
+            equipmentList: data.equipmentList || [],
+        },
+    });
+}
+
+/**
+ * Atualiza uma sala
+ */
+export async function updateRoom(id: string, data: {
+    name?: string;
+    capacity?: number;
+    description?: string;
+    floor?: string;
+    equipmentList?: string[];
+    isActive?: boolean;
+}) {
+    return prisma.room.update({
+        where: { id },
+        data,
+    });
 }

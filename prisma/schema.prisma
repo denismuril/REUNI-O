@@ -1,0 +1,185 @@
+// Prisma Schema para REUNI-O com MySQL
+// Todas as tabelas usam prefixo reunio_ para compatibilidade com banco compartilhado
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// NextAuth.js Models (com prefixo reunio_)
+// ============================================================
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("reunio_accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reunio_sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("reunio_verification_tokens")
+}
+
+// ============================================================
+// User Model (substitui auth.users + profiles)
+// ============================================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  password      String?
+  fullName      String    @map("full_name")
+  avatarUrl     String?   @map("avatar_url")
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts Account[]
+  sessions Session[]
+  bookings Booking[]
+
+  @@index([role])
+  @@map("reunio_users")
+}
+
+enum Role {
+  USER
+  ADMIN
+  SUPERADMIN
+}
+
+// ============================================================
+// Branch Model (Filiais)
+// ============================================================
+
+model Branch {
+  id        String   @id @default(uuid())
+  name      String
+  location  String
+  address   String?
+  timezone  String   @default("America/Sao_Paulo")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  rooms Room[]
+
+  @@map("reunio_branches")
+}
+
+// ============================================================
+// Room Model (Salas de Reunião)
+// ============================================================
+
+model Room {
+  id            String   @id @default(uuid())
+  branchId      String   @map("branch_id")
+  name          String
+  capacity      Int      @default(1)
+  equipmentList Json     @default("[]") @map("equipment_list")
+  description   String?  @db.Text
+  floor         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@index([capacity])
+  @@map("reunio_rooms")
+}
+
+// ============================================================
+// Booking Model (Reservas)
+// ============================================================
+
+model Booking {
+  id              String    @id @default(uuid())
+  roomId          String    @map("room_id")
+  userId          String?   @map("user_id")
+  creatorName     String    @map("creator_name")
+  creatorEmail    String    @map("creator_email")
+  title           String
+  description     String?   @db.Text
+  startTime       DateTime  @map("start_time")
+  endTime         DateTime  @map("end_time")
+  isRecurring     Boolean   @default(false) @map("is_recurring")
+  recurrenceType  String?   @map("recurrence_type")
+  parentBookingId String?   @map("parent_booking_id")
+  status          Status    @default(CONFIRMED)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  room          Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user          User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentBooking Booking?           @relation("RecurringBookings", fields: [parentBookingId], references: [id], onDelete: Cascade)
+  childBookings Booking[]          @relation("RecurringBookings")
+  cancelTokens  CancellationToken[]
+
+  @@index([roomId])
+  @@index([userId])
+  @@index([startTime, endTime])
+  @@index([parentBookingId])
+  @@index([status])
+  @@map("reunio_bookings")
+}
+
+enum Status {
+  CONFIRMED
+  CANCELLED
+  PENDING
+}
+
+// ============================================================
+// CancellationToken Model (Tokens de Cancelamento)
+// ============================================================
+
+model CancellationToken {
+  id        String   @id @default(uuid())
+  bookingId String   @map("booking_id")
+  token     String
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@map("reunio_cancellation_tokens")
+}

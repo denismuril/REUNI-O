@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, FileText, Search, BarChart3 } from "lucide-react";
+import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, Search, BarChart3 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,9 +24,34 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { createClient } from "@/lib/supabase/client";
-import { Branch, Room } from "@/types/supabase";
-import { getBookingsForAdmin, getDeletionLogs, adminDeleteBooking, BookingForAdmin, DeletionLog } from "@/app/actions/admin-actions";
+import { getBranches, getRoomsByBranch } from "@/app/actions/booking";
+import {
+    getBookingsForAdmin,
+    getDeletionLogs,
+    adminDeleteBooking,
+    createBranch,
+    updateBranch,
+    createRoom,
+    updateRoom,
+    BookingForAdmin,
+    DeletionLog,
+} from "@/app/actions/admin-actions";
+
+// Tipos locais
+type Branch = {
+    id: string;
+    name: string;
+    location: string;
+    isActive: boolean;
+};
+
+type Room = {
+    id: string;
+    name: string;
+    capacity: number;
+    branchId: string;
+    isActive: boolean;
+};
 
 // Schemas
 const branchSchema = z.object({
@@ -38,18 +63,10 @@ const roomSchema = z.object({
     name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
     branchId: z.string().min(1, "Selecione uma filial"),
     capacity: z.coerce.number().min(1, "Capacidade mínima é 1"),
-    color: z.string().optional(),
 });
 
 type BranchFormData = z.infer<typeof branchSchema>;
 type RoomFormData = z.infer<typeof roomSchema>;
-
-// Tipo estendido para Room incluindo dados da filial
-type RoomWithBranch = Room & {
-    branches?: {
-        name: string;
-    } | null;
-};
 
 export default function AdminPage() {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -59,7 +76,7 @@ export default function AdminPage() {
 
     // Dados
     const [branches, setBranches] = useState<Branch[]>([]);
-    const [rooms, setRooms] = useState<RoomWithBranch[]>([]);
+    const [rooms, setRooms] = useState<Room[]>([]);
 
     // Estados de edição
     const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
@@ -73,7 +90,6 @@ export default function AdminPage() {
 
     // Reuniões Admin
     const [bookings, setBookings] = useState<BookingForAdmin[]>([]);
-    const [deletionLogs, setDeletionLogs] = useState<DeletionLog[]>([]);
     const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null);
     const [deletionReason, setDeletionReason] = useState("");
     const [bookingError, setBookingError] = useState("");
@@ -95,8 +111,6 @@ export default function AdminPage() {
         return matchesSearch && matchesDate;
     });
 
-    const supabase = createClient();
-
     const branchForm = useForm<BranchFormData>({
         resolver: zodResolver(branchSchema),
         defaultValues: { name: "", location: "" },
@@ -104,7 +118,7 @@ export default function AdminPage() {
 
     const roomForm = useForm<RoomFormData>({
         resolver: zodResolver(roomSchema),
-        defaultValues: { name: "", branchId: "", capacity: 10, color: "#3B82F6" },
+        defaultValues: { name: "", branchId: "", capacity: 10 },
     });
 
     // Carrega dados
@@ -114,25 +128,21 @@ export default function AdminPage() {
     }, [isAuthenticated]);
 
     async function loadData() {
-        const { data: branchesData } = await supabase
-            .from("branches")
-            .select("*")
-            .order("name");
+        // Carregar branches via server action
+        const branchesData = await getBranches();
+        setBranches(branchesData as Branch[]);
 
-        const { data: roomsData } = await supabase
-            .from("rooms")
-            .select("*, branches(name)")
-            .order("name");
+        // Carregar todas as rooms (precisamos buscar de cada branch)
+        const allRooms: Room[] = [];
+        for (const branch of branchesData) {
+            const roomsData = await getRoomsByBranch(branch.id);
+            allRooms.push(...(roomsData as Room[]));
+        }
+        setRooms(allRooms);
 
-        if (branchesData) setBranches(branchesData);
-        if (roomsData) setRooms(roomsData as RoomWithBranch[]);
-
-        // Carrega reuniões e logs
+        // Carrega reuniões
         const bookingsData = await getBookingsForAdmin();
         setBookings(bookingsData);
-
-        const logsData = await getDeletionLogs();
-        setDeletionLogs(logsData);
     }
 
     // Exclusão de reunião (admin)
@@ -206,26 +216,17 @@ export default function AdminPage() {
 
         try {
             if (editingBranchId) {
-                // UPDATE
-                const { error } = await (supabase.from("branches") as any)
-                    .update({
-                        name: data.name,
-                        location: data.location
-                    })
-                    .eq("id", editingBranchId);
-
-                if (error) throw error;
+                await updateBranch(editingBranchId, {
+                    name: data.name,
+                    location: data.location
+                });
                 setBranchSuccess(`Filial "${data.name}" atualizada com sucesso!`);
                 setEditingBranchId(null);
             } else {
-                // INSERT
-                const { error } = await (supabase.from("branches") as any).insert({
+                await createBranch({
                     name: data.name,
                     location: data.location,
-                    is_active: true,
                 });
-
-                if (error) throw error;
                 setBranchSuccess(`Filial "${data.name}" criada com sucesso!`);
             }
 
@@ -237,16 +238,11 @@ export default function AdminPage() {
     };
 
     const deleteBranch = async (id: string, name: string) => {
-        if (!confirm(`Tem certeza que deseja excluir a filial "${name}"? Isso pode afetar salas e reservas vinculadas.`)) return;
+        if (!confirm(`Tem certeza que deseja excluir a filial "${name}"?`)) return;
 
         try {
-            const { error } = await supabase.from("branches").delete().eq("id", id);
-            if (error) throw error;
-
-            // Verifica se deletou realmente (em alguns casos RLS pode impedir mas não dar erro se policy for using false)
-            // Mas aqui estamos usando policy true
-
-            setBranchSuccess(`Filial "${name}" excluída com sucesso!`);
+            await updateBranch(id, { isActive: false });
+            setBranchSuccess(`Filial "${name}" desativada com sucesso!`);
             loadData();
         } catch (error: any) {
             setBranchError("Erro ao excluir. Verifique se existem salas vinculadas.");
@@ -255,12 +251,11 @@ export default function AdminPage() {
 
     // --- ROOMS ---
 
-    const startEditRoom = (room: RoomWithBranch) => {
+    const startEditRoom = (room: Room) => {
         setEditingRoomId(room.id);
         roomForm.setValue("name", room.name);
-        roomForm.setValue("branchId", room.branch_id);
+        roomForm.setValue("branchId", room.branchId);
         roomForm.setValue("capacity", room.capacity);
-        roomForm.setValue("color", room.color || "#3B82F6");
         setRoomError("");
         setRoomSuccess("");
     };
@@ -278,30 +273,18 @@ export default function AdminPage() {
 
         try {
             if (editingRoomId) {
-                // UPDATE
-                const { error } = await (supabase.from("rooms") as any)
-                    .update({
-                        name: data.name,
-                        branch_id: data.branchId,
-                        capacity: data.capacity,
-                        color: data.color || "#3B82F6",
-                    })
-                    .eq("id", editingRoomId);
-
-                if (error) throw error;
+                await updateRoom(editingRoomId, {
+                    name: data.name,
+                    capacity: data.capacity,
+                });
                 setRoomSuccess(`Sala "${data.name}" atualizada com sucesso!`);
                 setEditingRoomId(null);
             } else {
-                // INSERT
-                const { error } = await (supabase.from("rooms") as any).insert({
+                await createRoom({
+                    branchId: data.branchId,
                     name: data.name,
-                    branch_id: data.branchId,
                     capacity: data.capacity,
-                    color: data.color || "#3B82F6",
-                    is_active: true,
                 });
-
-                if (error) throw error;
                 setRoomSuccess(`Sala "${data.name}" criada com sucesso!`);
             }
 
@@ -316,10 +299,8 @@ export default function AdminPage() {
         if (!confirm(`Tem certeza que deseja excluir a sala "${name}"?`)) return;
 
         try {
-            const { error } = await supabase.from("rooms").delete().eq("id", id);
-            if (error) throw error;
-
-            setRoomSuccess(`Sala "${name}" excluída com sucesso!`);
+            await updateRoom(id, { isActive: false });
+            setRoomSuccess(`Sala "${name}" desativada com sucesso!`);
             loadData();
         } catch (error: any) {
             setRoomError("Erro ao excluir sala.");
@@ -327,7 +308,7 @@ export default function AdminPage() {
     };
 
 
-    // Tela de login (inalterada na lógica, mas incluída aqui)
+    // Tela de login
     if (!isAuthenticated) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -586,25 +567,14 @@ export default function AdminPage() {
                                         </p>
                                     )}
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="roomCapacity">Capacidade</Label>
-                                        <Input
-                                            id="roomCapacity"
-                                            type="number"
-                                            {...roomForm.register("capacity")}
-                                            placeholder="10"
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="roomColor">Cor</Label>
-                                        <Input
-                                            id="roomColor"
-                                            type="color"
-                                            {...roomForm.register("color")}
-                                            className="h-10 p-1"
-                                        />
-                                    </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="roomCapacity">Capacidade</Label>
+                                    <Input
+                                        id="roomCapacity"
+                                        type="number"
+                                        {...roomForm.register("capacity")}
+                                        placeholder="10"
+                                    />
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="submit" className="flex-1">
@@ -638,17 +608,11 @@ export default function AdminPage() {
                                             key={room.id}
                                             className={`flex items-center justify-between p-3 rounded-lg border ${editingRoomId === room.id ? 'bg-blue-50 border-blue-200 border-l-4 border-l-blue-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}
                                         >
-                                            <div className="flex items-center gap-3">
-                                                <div
-                                                    className="w-4 h-4 rounded"
-                                                    style={{ backgroundColor: room.color || "#3B82F6" }}
-                                                />
-                                                <div>
-                                                    <p className="font-medium">{room.name}</p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        {room.branches?.name} • {room.capacity} pessoas
-                                                    </p>
-                                                </div>
+                                            <div>
+                                                <p className="font-medium">{room.name}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {room.capacity} pessoas
+                                                </p>
                                             </div>
                                             <div className="flex items-center gap-1">
                                                 <Button
@@ -689,7 +653,7 @@ export default function AdminPage() {
                             Gerenciar Reuniões
                         </CardTitle>
                         <CardDescription>
-                            Visualize e exclua reuniões agendadas (com registro de log)
+                            Visualize e exclua reuniões agendadas
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -797,32 +761,15 @@ export default function AdminPage() {
                                 </p>
                             )}
                         </div>
-
-                        {/* Logs de Exclusão */}
-                        {deletionLogs.length > 0 && (
-                            <div className="mt-6 pt-6 border-t">
-                                <h4 className="font-medium mb-3 flex items-center gap-2">
-                                    <FileText className="h-4 w-4" />
-                                    Histórico de Exclusões
-                                </h4>
-                                <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                                    {deletionLogs.map((log) => (
-                                        <div key={log.id} className="text-xs p-2 bg-slate-50 rounded border border-slate-100">
-                                            <span className="font-medium">{log.booking_title}</span>
-                                            <span className="text-muted-foreground"> • {log.room_name} • </span>
-                                            <span className="text-muted-foreground">
-                                                Excluído em {new Date(log.deleted_at).toLocaleDateString("pt-BR")} por {log.deleted_by}
-                                            </span>
-                                            {log.deletion_reason && (
-                                                <span className="text-muted-foreground"> • Motivo: {log.deletion_reason}</span>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
                     </CardContent>
                 </Card>
+
+                {/* Link para página principal */}
+                <div className="mt-8 text-center">
+                    <Link href="/">
+                        <Button variant="outline">Voltar para o Calendário</Button>
+                    </Link>
+                </div>
             </main>
         </div>
     );

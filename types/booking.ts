@@ -66,7 +66,7 @@ export interface CalendarEvent {
 // Tipos para o formulário de booking
 // ============================================================
 
-export type RecurrenceType = 'none' | 'daily' | 'weekly';
+export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'custom';
 
 export interface BookingFormData {
     branchId: string;
@@ -78,6 +78,8 @@ export interface BookingFormData {
     startTime: string; // "HH:mm" format
     endTime: string; // "HH:mm" format
     recurrence: RecurrenceType;
+    recurrenceEndDate?: Date; // Data final para a recorrência
+    selectedDaysOfWeek?: number[]; // 0-6 Para dias da semana (custom)
 }
 
 export interface BookingFormProps {
@@ -134,8 +136,8 @@ export interface EmailNotificationPayload {
 // ============================================================
 
 export const BUSINESS_HOURS = {
-    start: 8, // 8:00 AM
-    end: 19, // 7:00 PM
+    start: 0, // 00:00
+    end: 24, // 24:00 (end of day)
 } as const;
 
 export const SLOT_DURATION_MINUTES = 30;

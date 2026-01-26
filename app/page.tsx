@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { format, startOfWeek, endOfWeek, subDays, addDays, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Calendar as CalendarIcon, Clock, Users, Building2, DoorOpen, Plus, ChevronLeft, ChevronRight, Filter, Search } from "lucide-react";
+import { Clock, Users, Building2, DoorOpen, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Image from "next/image";
+import { signOut } from "next-auth/react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,17 +25,32 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 
-import { createClient } from "@/lib/supabase/client";
-import { Database, BookingDetails } from "@/types/supabase";
+import { getBranches, getRoomsByBranch, getBookingsForCalendar } from "@/app/actions/booking";
 import { BookingForm } from "@/components/forms/BookingForm";
 import { DailyView } from "@/components/calendar/DailyView";
 import { WeeklyView } from "@/components/calendar/WeeklyView";
 import { BookingDetailsModal, CalendarEvent } from "@/components/modals/BookingDetailsModal";
 
-type Branch = Database["public"]["Tables"]["branches"]["Row"];
-type Room = Database["public"]["Tables"]["rooms"]["Row"];
+type Branch = {
+    id: string;
+    name: string;
+    location: string;
+    address: string | null;
+    timezone: string;
+    isActive: boolean;
+};
+
+type Room = {
+    id: string;
+    name: string;
+    capacity: number;
+    description: string | null;
+    floor: string | null;
+    isActive: boolean;
+};
 
 type CalendarViewType = "daily" | "weekly";
+
 function DailyEventList({ events, currentDate }: { events: CalendarEvent[]; currentDate: Date }) {
     const dailyEvents = events.filter(e => isSameDay(e.startTime, currentDate));
 
@@ -86,25 +102,15 @@ export default function HomePage() {
     const [initialBookingDate, setInitialBookingDate] = useState<Date>();
     const [initialBookingTime, setInitialBookingTime] = useState<string>();
 
-
-    const supabase = createClient();
-
-    // Carrega filiais
+    // Carrega filiais via server action
     useEffect(() => {
         async function fetchBranches() {
-            const { data } = await (supabase
-                .from("branches")
-                .select("*")
-                .eq("is_active", true)
-                .order("name") as any);
-
-            if (data) {
-                setBranches(data);
-                if (data.length > 0 && !selectedBranch) {
-                    setSelectedBranch(data[0].id);
-                }
-                setIsBranchesLoaded(true);
+            const data = await getBranches();
+            setBranches(data as Branch[]);
+            if (data.length > 0 && !selectedBranch) {
+                setSelectedBranch(data[0].id);
             }
+            setIsBranchesLoaded(true);
         }
         fetchBranches();
     }, []);
@@ -117,21 +123,14 @@ export default function HomePage() {
                 return;
             }
 
-            const { data } = await (supabase
-                .from("rooms")
-                .select("*")
-                .eq("branch_id", selectedBranch)
-                .eq("is_active", true)
-                .order("name") as any);
-
-            if (data) {
-                setRooms(data);
-                setSelectedRoom("all");
-            }
+            const data = await getRoomsByBranch(selectedBranch);
+            setRooms(data as Room[]);
+            setSelectedRoom("all");
         }
         fetchRooms();
     }, [selectedBranch]);
-    // Carrega bookings
+
+    // Carrega bookings via server action
     const fetchBookings = useCallback(async () => {
         if (!isBranchesLoaded) return;
 
@@ -140,7 +139,6 @@ export default function HomePage() {
         try {
             let start: Date, end: Date;
             if (viewType === "weekly") {
-                // Pega a semana inteira + margem de segurança para timezone
                 start = subDays(startOfWeek(currentDate, { weekStartsOn: 1 }), 1);
                 end = addDays(endOfWeek(currentDate, { weekStartsOn: 1 }), 1);
             } else {
@@ -148,50 +146,36 @@ export default function HomePage() {
                 end = addDays(currentDate, 2);
             }
 
-            let query = supabase
-                .from("booking_details")
-                .select("*")
-                .gte("start_time", start.toISOString())
-                .lt("end_time", end.toISOString())
-                .order("start_time");
+            const data = await getBookingsForCalendar(
+                start,
+                end,
+                selectedBranch || undefined,
+                selectedRoom !== "all" ? selectedRoom : undefined
+            );
 
-            if (selectedBranch) {
-                query = query.eq("branch_id", selectedBranch);
-            }
+            const calendarEvents: CalendarEvent[] = data.map((booking) => ({
+                id: booking.id,
+                title: booking.title,
+                description: booking.description,
+                startTime: new Date(booking.start_time),
+                endTime: new Date(booking.end_time),
+                roomId: booking.room_id,
+                roomName: booking.room_name,
+                userId: booking.user_id,
+                userName: booking.user_name || "",
+                userEmail: booking.user_email || "",
+                creatorName: booking.creator_name,
+                isRecurring: booking.is_recurring,
+                status: booking.status as "confirmed" | "cancelled" | "pending",
+            }));
 
-            if (selectedRoom && selectedRoom !== "all") {
-                query = query.eq("room_id", selectedRoom);
-            }
-
-            const { data, error } = await query;
-
-            if (data) {
-                const calendarEvents: CalendarEvent[] = data
-                    .filter((booking: BookingDetails) => booking.id && booking.start_time && booking.end_time)
-                    .map((booking: BookingDetails) => ({
-                        id: booking.id!,
-                        title: booking.title || "Sem título",
-                        description: booking.description,
-                        startTime: new Date(booking.start_time!),
-                        endTime: new Date(booking.end_time!),
-                        roomId: booking.room_id || "",
-                        roomName: booking.room_name || "Sala",
-                        userId: booking.user_id,
-                        userName: booking.user_name || "",
-                        userEmail: booking.user_email || "",
-                        creatorName: booking.creator_name,
-                        isRecurring: booking.is_recurring || false,
-                        status: (booking.status || "confirmed") as "confirmed" | "cancelled" | "pending",
-                    }));
-
-                setEvents(calendarEvents);
-            }
+            setEvents(calendarEvents);
         } catch (error) {
             console.error("Erro ao carregar reservas:", error);
         } finally {
             setIsLoading(false);
         }
-    }, [currentDate, viewType, selectedBranch, selectedRoom, supabase, isBranchesLoaded]);
+    }, [currentDate, viewType, selectedBranch, selectedRoom, isBranchesLoaded]);
 
     useEffect(() => {
         fetchBookings();
@@ -204,7 +188,6 @@ export default function HomePage() {
     const handleSlotClick = (date: Date) => {
         setInitialBookingDate(date);
 
-        // Formata hora para string HH:00 ou HH:30
         const hours = date.getHours().toString().padStart(2, "0");
         const minutes = date.getMinutes().toString().padStart(2, "0");
         setInitialBookingTime(`${hours}:${minutes}`);
@@ -213,9 +196,9 @@ export default function HomePage() {
     };
 
     const handleLogout = async () => {
-        await supabase.auth.signOut();
-        window.location.href = "/login";
+        await signOut({ callbackUrl: "/login" });
     };
+
     return (
         <div className="flex h-screen bg-background overflow-hidden relative">
             <div className="hidden lg:flex w-[300px] flex-col border-r bg-muted/40 p-4 gap-6 shrink-0 h-full overflow-y-auto">

@@ -48,21 +48,76 @@ export function combineDateAndTime(date: Date, time: string): Date {
 /**
  * Gera datas para recorrência diária ou semanal
  */
+/**
+ * Gera datas para recorrência
+ */
 export function generateRecurringDates(
     startDate: Date,
-    recurrenceType: 'daily' | 'weekly',
-    monthsAhead: number = 3
+    recurrenceType: 'daily' | 'weekly' | 'monthly' | 'custom',
+    options?: {
+        endDate?: Date;
+        monthsAhead?: number;
+        daysOfWeek?: number[]; // 0-6
+    }
 ): Date[] {
     const dates: Date[] = [];
-    const endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth() + monthsAhead);
 
-    const increment = recurrenceType === 'daily' ? 1 : 7;
+    // Define data final (padrão 3 meses se não especificado)
+    let finalDate: Date;
+    if (options?.endDate) {
+        finalDate = new Date(options.endDate);
+        finalDate.setHours(23, 59, 59, 999);
+    } else {
+        finalDate = new Date(startDate);
+        finalDate.setMonth(finalDate.getMonth() + (options?.monthsAhead || 3));
+    }
+
     let currentDate = new Date(startDate);
+    // Avança um dia para não incluir a data de início (que já é criada como a reserva principal)
+    // Se a lógica do backend espera que a lista inclua a data inicial ou não, isso deve ser ajustado.
+    // Assumindo aqui que geramos OS FILHOS, então começamos do próximo.
+    // PORÉM, para simplificar a lógica de "dias da semana", é mais fácil iterar dia a dia.
 
-    while (currentDate < endDate) {
-        dates.push(new Date(currentDate));
-        currentDate.setDate(currentDate.getDate() + increment);
+    // Vamos começar do dia SEGUINTE ao start date para evitar duplicação da reserva principal
+    currentDate.setDate(currentDate.getDate() + 1);
+
+    while (currentDate <= finalDate) {
+        const dayOfWeek = currentDate.getDay(); // 0 (Dom) - 6 (Sáb)
+
+        let shouldAdd = false;
+
+        switch (recurrenceType) {
+            case 'daily':
+                shouldAdd = true;
+                break;
+            case 'weekly':
+                // Mesmo dia da semana da data original
+                shouldAdd = dayOfWeek === startDate.getDay();
+                break;
+            case 'monthly':
+                // Mesmo dia do mês (atenção para meses com menos dias)
+                // Se start date for dia 31, em meses com 30 dias pode pular ou ajustar.
+                // Simples implementação: verifica se o dia do mês bate.
+                if (currentDate.getDate() === startDate.getDate()) {
+                    shouldAdd = true;
+                }
+                break;
+            case 'custom':
+                if (options?.daysOfWeek && options.daysOfWeek.length > 0) {
+                    if (options.daysOfWeek.includes(dayOfWeek)) {
+                        shouldAdd = true;
+                    }
+                }
+                break;
+        }
+
+        if (shouldAdd) {
+            dates.push(new Date(currentDate));
+        }
+
+        // Avança o loop
+        // Otimização: para weekly/monthly poderia pular mais, mas dia-a-dia cobre 'custom' corretamente
+        currentDate.setDate(currentDate.getDate() + 1);
     }
 
     return dates;

@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 
 export interface OccupancyStats {
     roomId: string;
@@ -32,19 +32,6 @@ export interface MonthlyStats {
     peakDay: string;
 }
 
-// Type helper para resultados de queries do Supabase
-interface BookingDetailRow {
-    room_id: string;
-    room_name: string;
-    branch_name: string;
-    room_color: string | null;
-    start_time: string;
-    end_time: string;
-    creator_email: string | null;
-    creator_name: string | null;
-    status: string;
-}
-
 /**
  * Busca estatísticas de ocupação por sala
  */
@@ -53,38 +40,36 @@ export async function getOccupancyByRoom(
     endDate: Date
 ): Promise<{ data: OccupancyStats[]; error?: string }> {
     try {
-        const supabase = await createClient();
-
-        const { data: bookings, error } = await supabase
-            .from("booking_details")
-            .select("room_id, room_name, branch_name, room_color, start_time, end_time")
-            .gte("start_time", startDate.toISOString())
-            .lte("end_time", endDate.toISOString())
-            .eq("status", "confirmed");
-
-        if (error) {
-            return { data: [], error: error.message };
-        }
+        const bookings = await prisma.booking.findMany({
+            where: {
+                startTime: { gte: startDate },
+                endTime: { lte: endDate },
+                status: "CONFIRMED",
+            },
+            include: {
+                room: {
+                    include: { branch: true },
+                },
+            },
+        });
 
         // Agrupar por sala
         const roomStats = new Map<string, OccupancyStats>();
-        const bookingList = (bookings || []) as BookingDetailRow[];
 
-        bookingList.forEach((booking) => {
-            const roomId = booking.room_id;
+        bookings.forEach((booking) => {
+            const roomId = booking.roomId;
             const hours =
-                (new Date(booking.end_time).getTime() -
-                    new Date(booking.start_time).getTime()) /
+                (booking.endTime.getTime() - booking.startTime.getTime()) /
                 (1000 * 60 * 60);
 
             if (!roomStats.has(roomId)) {
                 roomStats.set(roomId, {
                     roomId,
-                    roomName: booking.room_name,
-                    branchName: booking.branch_name,
+                    roomName: booking.room.name,
+                    branchName: booking.room.branch.name,
                     totalBookings: 0,
                     totalHours: 0,
-                    color: booking.room_color || "#3B82F6",
+                    color: "#3B82F6",
                 });
             }
 
@@ -112,18 +97,13 @@ export async function getPeakHours(
     endDate: Date
 ): Promise<{ data: PeakHourStats[]; error?: string }> {
     try {
-        const supabase = await createClient();
-
-        const { data: bookings, error } = await supabase
-            .from("bookings")
-            .select("start_time")
-            .gte("start_time", startDate.toISOString())
-            .lte("start_time", endDate.toISOString())
-            .eq("status", "confirmed");
-
-        if (error) {
-            return { data: [], error: error.message };
-        }
+        const bookings = await prisma.booking.findMany({
+            where: {
+                startTime: { gte: startDate, lte: endDate },
+                status: "CONFIRMED",
+            },
+            select: { startTime: true },
+        });
 
         // Contar por hora
         const hourCounts = new Map<number, number>();
@@ -131,10 +111,8 @@ export async function getPeakHours(
             hourCounts.set(h, 0);
         }
 
-        const bookingList = (bookings || []) as { start_time: string }[];
-
-        bookingList.forEach((booking) => {
-            const hour = new Date(booking.start_time).getHours();
+        bookings.forEach((booking) => {
+            const hour = booking.startTime.getHours();
             if (hourCounts.has(hour)) {
                 hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
             }
@@ -161,34 +139,33 @@ export async function getTopUsers(
     endDate: Date
 ): Promise<{ data: TopUserStats[]; error?: string }> {
     try {
-        const supabase = await createClient();
-
-        const { data: bookings, error } = await supabase
-            .from("bookings")
-            .select("creator_email, creator_name, start_time, end_time")
-            .gte("start_time", startDate.toISOString())
-            .lte("end_time", endDate.toISOString())
-            .eq("status", "confirmed");
-
-        if (error) {
-            return { data: [], error: error.message };
-        }
+        const bookings = await prisma.booking.findMany({
+            where: {
+                startTime: { gte: startDate },
+                endTime: { lte: endDate },
+                status: "CONFIRMED",
+            },
+            select: {
+                creatorEmail: true,
+                creatorName: true,
+                startTime: true,
+                endTime: true,
+            },
+        });
 
         // Agrupar por usuário
         const userStats = new Map<string, TopUserStats>();
-        const bookingList = (bookings || []) as { creator_email: string | null; creator_name: string | null; start_time: string; end_time: string }[];
 
-        bookingList.forEach((booking) => {
-            const email = booking.creator_email || "Desconhecido";
+        bookings.forEach((booking) => {
+            const email = booking.creatorEmail || "Desconhecido";
             const hours =
-                (new Date(booking.end_time).getTime() -
-                    new Date(booking.start_time).getTime()) /
+                (booking.endTime.getTime() - booking.startTime.getTime()) /
                 (1000 * 60 * 60);
 
             if (!userStats.has(email)) {
                 userStats.set(email, {
                     email,
-                    name: booking.creator_name || email.split("@")[0],
+                    name: booking.creatorName || email.split("@")[0],
                     totalBookings: 0,
                     totalHours: 0,
                 });
@@ -222,20 +199,18 @@ export async function getMonthlyStats(
         const endDate = new Date(year, month, 0, 23, 59, 59);
         const daysInMonth = endDate.getDate();
 
-        const supabase = await createClient();
+        const bookings = await prisma.booking.findMany({
+            where: {
+                startTime: { gte: startDate },
+                endTime: { lte: endDate },
+                status: "CONFIRMED",
+            },
+            include: {
+                room: true,
+            },
+        });
 
-        const { data: bookings, error } = await supabase
-            .from("booking_details")
-            .select("room_name, start_time, end_time")
-            .gte("start_time", startDate.toISOString())
-            .lte("end_time", endDate.toISOString())
-            .eq("status", "confirmed");
-
-        if (error) {
-            return { data: null, error: error.message };
-        }
-
-        if (!bookings || bookings.length === 0) {
+        if (bookings.length === 0) {
             return {
                 data: {
                     totalBookings: 0,
@@ -252,21 +227,19 @@ export async function getMonthlyStats(
         let totalHours = 0;
         const roomCounts = new Map<string, number>();
         const dayCounts = new Map<string, number>();
-        const bookingList = (bookings || []) as { room_name: string; start_time: string; end_time: string }[];
 
-        bookingList.forEach((booking) => {
+        bookings.forEach((booking) => {
             const hours =
-                (new Date(booking.end_time).getTime() -
-                    new Date(booking.start_time).getTime()) /
+                (booking.endTime.getTime() - booking.startTime.getTime()) /
                 (1000 * 60 * 60);
             totalHours += hours;
 
             // Contar por sala
-            const room = booking.room_name;
+            const room = booking.room.name;
             roomCounts.set(room, (roomCounts.get(room) || 0) + 1);
 
             // Contar por dia
-            const day = new Date(booking.start_time).toISOString().split("T")[0];
+            const day = booking.startTime.toISOString().split("T")[0];
             dayCounts.set(day, (dayCounts.get(day) || 0) + 1);
         });
 

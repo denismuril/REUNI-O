@@ -1,9 +1,41 @@
-import { type NextRequest } from 'next/server';
-import { updateSession } from '@/lib/supabase/middleware';
+import { withAuth } from 'next-auth/middleware';
+import { NextResponse } from 'next/server';
 
-export async function middleware(request: NextRequest) {
-    return await updateSession(request);
-}
+export default withAuth(
+    function middleware(request) {
+        // Permite acesso a rotas públicas
+        return NextResponse.next();
+    },
+    {
+        callbacks: {
+            authorized: ({ token, req }) => {
+                const path = req.nextUrl.pathname;
+
+                // Rotas públicas - sempre permite
+                const publicRoutes = ['/login', '/api/auth', '/api/cron'];
+                if (publicRoutes.some(route => path.startsWith(route))) {
+                    return true;
+                }
+
+                // Página principal - permite acesso sem login (guest booking)
+                if (path === '/') {
+                    return true;
+                }
+
+                // Admin - requer autenticação
+                if (path.startsWith('/admin')) {
+                    return !!token;
+                }
+
+                // Outras rotas - permite
+                return true;
+            },
+        },
+        pages: {
+            signIn: '/login',
+        },
+    }
+);
 
 export const config = {
     matcher: [
