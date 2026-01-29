@@ -2,7 +2,7 @@
  * Tipos para o estado do Calendário e componentes de booking
  */
 
-import { Booking, BookingDetails, Room, Branch } from './supabase';
+import { Booking, BookingDetails, Room, Branch } from './database';
 
 // ============================================================
 // Tipos de visualização do calendário

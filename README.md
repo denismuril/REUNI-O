@@ -1,10 +1,11 @@
 # REUNI-O 📅
 
-Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14, Supabase e Tailwind CSS.
+Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14, Prisma, MySQL e Tailwind CSS.
 
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)
-![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)
+![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma)
+![MySQL](https://img.shields.io/badge/MySQL-8.x-4479A1?logo=mysql)
 ![Tailwind](https://img.shields.io/badge/Tailwind-3.x-38B2AC?logo=tailwind-css)
 
 ## 🚀 Funcionalidades
@@ -13,7 +14,7 @@ Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14,
 
 - **Calendário Visual**: Visualização semanal e diária das reservas
 - **Reserva de Salas**: Formulário completo com validação
-- **Eventos Recorrentes**: Suporte a repetição diária e semanal
+- **Eventos Recorrentes**: Suporte a repetição diária, semanal, mensal e personalizada
 - **Cancelamento com OTP**: Confirmação segura via email
 - **Hover com Detalhes**: Informações da reserva ao passar o mouse
 - **Reservas de Visitantes**: Suporte seguro para reservas sem login (Guest)
@@ -21,14 +22,15 @@ Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14,
 ### Administração
 
 - **Gestão de Filiais**: CRUD completo de filiais/localizações
-- **Gestão de Salas**: CRUD com cores personalizadas
+- **Gestão de Salas**: CRUD com capacidade configurável
+- **Gestão de Usuários Admin**: Criar/excluir administradores do sistema
 - **Exclusão de Reuniões**: Com auditoria e registro de motivo
-- **Logs de Ações**: Histórico de exclusões administrativas
+- **Pesquisa de Reuniões**: Busca por título, sala ou responsável
 
 ### Técnico & Segurança
 
-- **Prevenção de Double Booking**: Validação em nível de banco
-- **RLS (Row Level Security)**: Policies granulares para usuários e visitantes
+- **Prevenção de Double Booking**: Validação em nível de servidor
+- **NextAuth.js**: Autenticação segura com sessões
 - **Server Actions**: Validações de domínio e lógica de negócio no servidor
 - **Zod Validation**: Validação robusta de dados
 
@@ -39,7 +41,10 @@ Sistema corporativo de reserva de salas de reunião desenvolvido com Next.js 14,
 | Next.js | 14.x | Framework React (App Router) |
 | TypeScript | 5.x | Tipagem estática |
 | Tailwind CSS | 3.x | Estilização |
-| Supabase | - | Backend + Auth + PostgreSQL |
+| Prisma | 5.x | ORM para MySQL |
+| MySQL | 8.x | Banco de dados relacional |
+| NextAuth.js | 4.x | Autenticação |
+| bcryptjs | - | Hash de senhas |
 | Resend | - | Emails transacionais |
 | shadcn/ui | - | Componentes UI |
 
@@ -56,6 +61,10 @@ npm install
 # Configure variáveis de ambiente
 cp .env.example .env.local
 # Edite .env.local com suas credenciais
+
+# Gere o cliente Prisma e aplique migrações
+npx prisma generate
+npx prisma db push
 
 # Execute em desenvolvimento
 npm run dev
@@ -78,8 +87,7 @@ REUNI-O/
 ├── app/                      # Páginas Next.js (App Router)
 │   ├── actions/              # Server Actions (Lógica Segura)
 │   ├── admin/                # Painel Administrativo
-│   ├── api/                  # API Routes
-│   ├── auth/                 # Auth Callback
+│   ├── api/                  # API Routes (Auth, Cron)
 │   ├── login/                # Login
 │   └── page.tsx              # Calendário Principal
 ├── components/
@@ -87,21 +95,28 @@ REUNI-O/
 │   ├── forms/                # Formulários
 │   └── ui/                   # Componentes UI (shadcn)
 ├── lib/
-│   └── supabase/             # Clientes Supabase
+│   ├── prisma/               # Cliente Prisma (Singleton)
+│   ├── auth/                 # Configuração NextAuth
+│   └── utils.ts              # Funções utilitárias
+├── prisma/
+│   └── schema.prisma         # Schema do banco de dados
 ├── types/                    # TypeScript Types
-├── docs/                     # Documentação
-│   ├── INSTALL.md
-│   ├── DEPLOY_LINUX.md
-│   └── ARCHITECTURE.md
-└── supabase/                 # Migrations (RLS, Triggers)
+└── docs/                     # Documentação
 ```
 
 ## 🔐 Variáveis de Ambiente
 
 ```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+# Banco de Dados
+DATABASE_URL="mysql://user:password@host:3306/database"
+
+# NextAuth
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=sua_chave_secreta_aqui
+
+# Admin
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=sua_senha_admin
 
 # Resend (Email)
 RESEND_API_KEY=re_xxx
@@ -118,7 +133,8 @@ branches (Filiais)
     └── rooms (Salas)
             └── bookings (Reservas)
 
-admin_deletion_logs (Auditoria)
+users (Usuários autenticados)
+cancellation_tokens (Tokens OTP)
 ```
 
 ## 🚧 Roadmap
@@ -126,8 +142,9 @@ admin_deletion_logs (Auditoria)
 - [x] Sistema de reservas
 - [x] Cancelamento com OTP
 - [x] Painel administrativo
-- [x] Logs de auditoria
 - [x] Suporte a Guest Users
+- [x] Migração para MySQL/Prisma
+- [x] Recorrência avançada (mensal, personalizada)
 - [ ] Integração Google Calendar
 - [ ] App mobile (React Native)
 - [ ] Relatórios de utilização
@@ -147,4 +164,4 @@ MIT License - veja o arquivo [LICENSE](LICENSE) para detalhes.
 
 ---
 
-Desenvolvido com ❤️ usando Next.js e Supabase
+Desenvolvido com ❤️ usando Next.js e Prisma

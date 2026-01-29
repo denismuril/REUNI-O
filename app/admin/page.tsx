@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, Search, BarChart3 } from "lucide-react";
+import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, Search, BarChart3, Users, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,12 @@ import {
     BookingForAdmin,
     DeletionLog,
 } from "@/app/actions/admin-actions";
+import {
+    getAdminUsers,
+    createAdminUser,
+    deleteAdminUser,
+    AdminUser,
+} from "@/app/actions/user-actions";
 
 // Tipos locais
 type Branch = {
@@ -65,8 +71,16 @@ const roomSchema = z.object({
     capacity: z.coerce.number().min(1, "Capacidade mínima é 1"),
 });
 
+const userSchema = z.object({
+    email: z.string().email("Email inválido"),
+    fullName: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
+    password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres"),
+    role: z.enum(["ADMIN", "SUPERADMIN"]),
+});
+
 type BranchFormData = z.infer<typeof branchSchema>;
 type RoomFormData = z.infer<typeof roomSchema>;
+type UserFormData = z.infer<typeof userSchema>;
 
 export default function AdminPage() {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -97,6 +111,12 @@ export default function AdminPage() {
     const [bookingSearch, setBookingSearch] = useState("");
     const [bookingDateFilter, setBookingDateFilter] = useState("");
 
+    // Usuários Admin
+    const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+    const [userSuccess, setUserSuccess] = useState("");
+    const [userError, setUserError] = useState("");
+    const [showUserForm, setShowUserForm] = useState(false);
+
     // Filtrar reuniões por pesquisa e data
     const filteredBookings = bookings.filter((b) => {
         const matchesSearch =
@@ -121,6 +141,11 @@ export default function AdminPage() {
         defaultValues: { name: "", branchId: "", capacity: 10 },
     });
 
+    const userForm = useForm<UserFormData>({
+        resolver: zodResolver(userSchema),
+        defaultValues: { email: "", fullName: "", password: "", role: "ADMIN" },
+    });
+
     // Carrega dados
     useEffect(() => {
         if (!isAuthenticated) return;
@@ -143,6 +168,10 @@ export default function AdminPage() {
         // Carrega reuniões
         const bookingsData = await getBookingsForAdmin();
         setBookings(bookingsData);
+
+        // Carrega usuários admin
+        const usersData = await getAdminUsers();
+        setAdminUsers(usersData);
     }
 
     // Exclusão de reunião (admin)
@@ -697,6 +726,15 @@ export default function AdminPage() {
                                     <X className="h-4 w-4" />
                                 </Button>
                             )}
+                            <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => loadData()}
+                                className="h-10"
+                            >
+                                <Search className="h-4 w-4 mr-2" />
+                                Pesquisar
+                            </Button>
                         </div>
 
                         <div className="space-y-2 max-h-[400px] overflow-y-auto">
@@ -758,6 +796,190 @@ export default function AdminPage() {
                             {bookings.length === 0 && (
                                 <p className="text-sm text-muted-foreground text-center py-4">
                                     Nenhuma reunião futura agendada
+                                </p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* --- GERENCIAR USUÁRIOS ADMIN --- */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Users className="h-5 w-5" />
+                            Gerenciar Usuários Admin
+                        </CardTitle>
+                        <CardDescription>
+                            Adicione ou remova administradores do sistema
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {userError && (
+                            <div className="p-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm mb-4">
+                                {userError}
+                            </div>
+                        )}
+                        {userSuccess && (
+                            <div className="p-3 bg-green-100 border border-green-200 rounded-md text-green-600 text-sm mb-4">
+                                {userSuccess}
+                            </div>
+                        )}
+
+                        {/* Botão Adicionar */}
+                        {!showUserForm && (
+                            <Button
+                                variant="outline"
+                                className="mb-4"
+                                onClick={() => setShowUserForm(true)}
+                            >
+                                <UserPlus className="h-4 w-4 mr-2" />
+                                Adicionar Admin
+                            </Button>
+                        )}
+
+                        {/* Formulário de criação */}
+                        {showUserForm && (
+                            <form
+                                onSubmit={userForm.handleSubmit(async (data) => {
+                                    setUserError("");
+                                    setUserSuccess("");
+                                    const result = await createAdminUser(data);
+                                    if (result.success) {
+                                        setUserSuccess(result.message);
+                                        userForm.reset();
+                                        setShowUserForm(false);
+                                        loadData();
+                                    } else {
+                                        setUserError(result.message);
+                                    }
+                                })}
+                                className="space-y-4 mb-6 p-4 border rounded-lg bg-slate-50"
+                            >
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="userEmail">Email</Label>
+                                        <Input
+                                            id="userEmail"
+                                            type="email"
+                                            {...userForm.register("email")}
+                                            placeholder="admin@empresa.com"
+                                        />
+                                        {userForm.formState.errors.email && (
+                                            <p className="text-xs text-red-500">
+                                                {userForm.formState.errors.email.message}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="userFullName">Nome Completo</Label>
+                                        <Input
+                                            id="userFullName"
+                                            {...userForm.register("fullName")}
+                                            placeholder="Nome do Admin"
+                                        />
+                                        {userForm.formState.errors.fullName && (
+                                            <p className="text-xs text-red-500">
+                                                {userForm.formState.errors.fullName.message}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="userPassword">Senha</Label>
+                                        <Input
+                                            id="userPassword"
+                                            type="password"
+                                            {...userForm.register("password")}
+                                            placeholder="******"
+                                        />
+                                        {userForm.formState.errors.password && (
+                                            <p className="text-xs text-red-500">
+                                                {userForm.formState.errors.password.message}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Nível de Acesso</Label>
+                                        <Select
+                                            value={userForm.watch("role")}
+                                            onValueChange={(v) => userForm.setValue("role", v as "ADMIN" | "SUPERADMIN")}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="ADMIN">Admin</SelectItem>
+                                                <SelectItem value="SUPERADMIN">Super Admin</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button type="submit">
+                                        <UserPlus className="h-4 w-4 mr-2" />
+                                        Criar Admin
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => {
+                                            setShowUserForm(false);
+                                            userForm.reset();
+                                        }}
+                                    >
+                                        Cancelar
+                                    </Button>
+                                </div>
+                            </form>
+                        )}
+
+                        {/* Lista de admins */}
+                        <div className="space-y-2">
+                            {adminUsers.map((user) => (
+                                <div
+                                    key={user.id}
+                                    className="flex items-center justify-between p-3 rounded-lg border bg-white hover:border-slate-300"
+                                >
+                                    <div className="flex-1">
+                                        <p className="font-medium">{user.fullName}</p>
+                                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                            <span>{user.email}</span>
+                                            <span className={`px-2 py-0.5 rounded-full text-xs ${user.role === "SUPERADMIN"
+                                                    ? "bg-purple-100 text-purple-700"
+                                                    : "bg-blue-100 text-blue-700"
+                                                }`}>
+                                                {user.role === "SUPERADMIN" ? "Super Admin" : "Admin"}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                                        onClick={async () => {
+                                            if (!confirm("Tem certeza que deseja excluir este admin?")) return;
+                                            setUserError("");
+                                            const result = await deleteAdminUser(user.id);
+                                            if (result.success) {
+                                                setUserSuccess(result.message);
+                                                loadData();
+                                            } else {
+                                                setUserError(result.message);
+                                            }
+                                        }}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ))}
+                            {adminUsers.length === 0 && (
+                                <p className="text-sm text-muted-foreground text-center py-4">
+                                    Nenhum administrador cadastrado no banco de dados.
+                                    <br />
+                                    <span className="text-xs">
+                                        Use as credenciais de ambiente para acessar.
+                                    </span>
                                 </p>
                             )}
                         </div>

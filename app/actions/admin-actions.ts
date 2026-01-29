@@ -34,12 +34,12 @@ export interface DeletionLog {
 export async function getBookingsForAdmin(): Promise<BookingForAdmin[]> {
     const bookings = await prisma.booking.findMany({
         where: {
-            startTime: { gte: new Date() },
+            // Remove future-only filter to show all bookings
         },
         include: {
             room: true,
         },
-        orderBy: { startTime: "asc" },
+        orderBy: { startTime: "desc" },
     });
 
     return bookings.map((b) => ({

@@ -12,7 +12,9 @@ O **REUNI-O** é um sistema de agendamento de salas de reunião desenvolvido com
 | **React** | 18.x | Biblioteca de UI |
 | **TypeScript** | 5.x | Tipagem estática |
 | **Tailwind CSS** | 3.x | Estilização utilitária |
-| **Supabase** | - | Backend-as-a-Service (Auth + PostgreSQL) |
+| **Prisma** | 5.x | ORM para MySQL |
+| **MySQL** | 8.x | Banco de dados relacional |
+| **NextAuth.js** | 4.x | Autenticação |
 | **Resend** | - | Envio de emails transacionais |
 
 ## Estrutura de Pastas
@@ -22,10 +24,13 @@ REUNI-O/
 ├── app/                          # App Router (Next.js 14)
 │   ├── actions/                  # Server Actions
 │   │   ├── admin-actions.ts      # Ações administrativas
-│   │   └── cancel-booking.ts     # Cancelamento de reservas
+│   │   ├── booking.ts            # Reservas e consultas
+│   │   ├── cancel-booking.ts     # Cancelamento de reservas
+│   │   └── user-actions.ts       # CRUD de usuários admin
 │   ├── admin/page.tsx            # Painel Administrativo
 │   ├── api/                      # API Routes
-│   ├── auth/callback/            # OAuth Callback
+│   │   ├── auth/[...nextauth]/   # NextAuth endpoints
+│   │   └── cron/                 # Jobs agendados
 │   ├── login/page.tsx            # Página de Login
 │   ├── globals.css               # Estilos globais
 │   ├── layout.tsx                # Layout raiz
@@ -39,29 +44,21 @@ REUNI-O/
 │   ├── forms/
 │   │   └── BookingForm.tsx       # Formulário de reserva
 │   └── ui/                       # Componentes UI (shadcn/ui)
-│       ├── button.tsx
-│       ├── calendar.tsx
-│       ├── card.tsx
-│       ├── input.tsx
-│       ├── select.tsx
-│       └── ...
 │
 ├── lib/
-│   ├── supabase/                 # Configuração Supabase
-│   │   ├── client.ts             # Cliente browser
-│   │   ├── server.ts             # Cliente server-side
-│   │   └── middleware.ts         # Middleware auth
+│   ├── prisma/                   # Cliente Prisma
+│   │   └── client.ts             # Singleton do Prisma
+│   ├── auth/                     # Configuração NextAuth
 │   └── utils.ts                  # Funções utilitárias
 │
+├── prisma/
+│   └── schema.prisma             # Schema do banco de dados
+│
 ├── types/                        # Definições TypeScript
+│   ├── database.ts               # Tipos do banco
 │   ├── booking.ts                # Tipos de reserva
-│   ├── supabase.ts               # Tipos gerados do Supabase
 │   └── index.ts
 │
-├── supabase/                     # Migrations e configs
-│   └── migrations/
-│
-├── public/                       # Assets estáticos
 └── docs/                         # Documentação
 ```
 
@@ -73,63 +70,54 @@ REUNI-O/
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   branches  │     │    rooms    │     │  bookings   │
 ├─────────────┤     ├─────────────┤     ├─────────────┤
-│ id (uuid)   │◄────│ branch_id   │     │ id (uuid)   │
-│ name        │     │ id (uuid)   │◄────│ room_id     │
+│ id (uuid)   │◄────│ branchId    │     │ id (uuid)   │
+│ name        │     │ id (uuid)   │◄────│ roomId      │
 │ location    │     │ name        │     │ title       │
-│ created_at  │     │ capacity    │     │ description │
-└─────────────┘     │ color       │     │ start_time  │
-                    │ created_at  │     │ end_time    │
-                    └─────────────┘     │ creator_*   │
-                                        │ user_id     │
+│ timezone    │     │ capacity    │     │ description │
+│ isActive    │     │ isActive    │     │ startTime   │
+│ createdAt   │     │ createdAt   │     │ endTime     │
+└─────────────┘     └─────────────┘     │ creatorName │
+                                        │ creatorEmail│
+                                        │ userId      │
                                         │ status      │
-                                        │ created_at  │
+                                        │ isRecurring │
                                         └─────────────┘
 
-┌─────────────────────┐
-│ admin_deletion_logs │
-├─────────────────────┤
-│ id (uuid)           │
-│ booking_id          │
-│ booking_title       │
-│ booking_start_time  │
-│ booking_end_time    │
-│ room_name           │
-│ creator_name        │
-│ creator_email       │
-│ deleted_by          │
-│ deletion_reason     │
-│ deleted_at          │
-└─────────────────────┘
+┌─────────────┐     ┌─────────────────────┐
+│    users    │     │ cancellation_tokens │
+├─────────────┤     ├─────────────────────┤
+│ id (uuid)   │     │ id (uuid)           │
+│ email       │     │ token               │
+│ fullName    │     │ bookingId           │
+│ createdAt   │     │ expiresAt           │
+└─────────────┘     │ usedAt              │
+                    └─────────────────────┘
 ```
-
-### Views
-
-- `booking_details` - View materializada com detalhes completos das reservas
 
 ## Fluxo de Autenticação
 
 ```
 ┌──────────┐     ┌──────────────┐     ┌──────────────┐
-│  Usuário │────►│ /login       │────►│ Supabase Auth│
+│  Usuário │────►│ /login       │────►│ NextAuth.js  │
 └──────────┘     └──────────────┘     └──────────────┘
                                               │
                                               ▼
 ┌──────────┐     ┌──────────────┐     ┌──────────────┐
-│  Home    │◄────│ /auth/callback│◄────│ OAuth Redirect│
+│  Home    │◄────│  Sessão JWT  │◄────│ Validação    │
 └──────────┘     └──────────────┘     └──────────────┘
 ```
 
 1. Usuário acessa `/login`
-2. Autentica via email/senha ou OAuth (Google)
-3. Supabase redireciona para `/auth/callback`
+2. Autentica via email/senha (NextAuth CredentialsProvider)
+3. Sessão JWT é criada e armazenada
 4. Middleware valida sessão e redireciona para `/`
 
 ## Fluxo de Cancelamento
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Solicitar   │────►│ Gerar OTP   │────►│ Enviar Email│
-│ Cancelamento│     │ (6 dígitos) │     │ via Resend  │
+│ Solicitar   │────►│ Gerar Token │────►│ Enviar Email│
+│ Cancelamento│     │ (UUID)      │     │ via Resend  │
 └─────────────┘     └─────────────┘     └─────────────┘
                                               │
                                               ▼
@@ -144,25 +132,32 @@ REUNI-O/
 O painel admin (`/admin`) permite:
 
 - Gerenciar filiais (CRUD)
-- Gerenciar salas (CRUD com cores)
-- Excluir reuniões (com auditoria)
-- Visualizar logs de exclusão
+- Gerenciar salas (CRUD com capacidade)
+- Gerenciar usuários admin (criar/excluir)
+- Excluir reuniões (com motivo)
+- Pesquisar reuniões por título, sala ou responsável
 
-**Acesso:** Credenciais hardcoded (ver `.env` para produção)
+**Acesso:**
+
+- **Primeiro acesso:** Usa credenciais de `ADMIN_USERNAME`/`ADMIN_PASSWORD` do `.env`
+- **Após criar admin no banco:** Login via email/senha armazenados no banco (com bcrypt)
 
 ## Variáveis de Ambiente
 
 | Variável | Descrição |
 |----------|-----------|
-| `NEXT_PUBLIC_SUPABASE_URL` | URL do projeto Supabase |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Chave anônima do Supabase |
+| `DATABASE_URL` | URL de conexão MySQL |
+| `NEXTAUTH_URL` | URL base da aplicação |
+| `NEXTAUTH_SECRET` | Chave secreta para JWT |
+| `ADMIN_USERNAME` | Usuário do painel admin |
+| `ADMIN_PASSWORD` | Senha do painel admin |
 | `RESEND_API_KEY` | Chave API do Resend |
 | `NEXT_PUBLIC_APP_URL` | URL pública da aplicação |
 
 ## Segurança
 
-- **RLS (Row Level Security)** habilitado em todas as tabelas
-- Autenticação via Supabase Auth
-- Server Actions para operações sensíveis
-- OTP via email para cancelamentos
-- Logs de auditoria para ações admin
+- **Prisma ORM** com queries parametrizadas (prevenção SQL injection)
+- Autenticação via **NextAuth.js** com sessões JWT
+- **Server Actions** para operações sensíveis
+- **Tokens OTP** via email para cancelamentos
+- Validação com **Zod** em formulários e server actions

@@ -9,6 +9,7 @@ Este guia explica como configurar o ambiente de desenvolvimento local.
 | Node.js | 18.x ou superior |
 | npm | 9.x ou superior |
 | Git | 2.x |
+| MySQL | 8.x |
 
 ## 1. Clone do Repositório
 
@@ -23,131 +24,37 @@ cd REUNI-O
 npm install
 ```
 
-## 3. Configuração do Supabase
+## 3. Configuração do Banco de Dados MySQL
 
-### 3.1 Criar Projeto no Supabase
-
-1. Acesse [supabase.com](https://supabase.com)
-2. Crie uma conta ou faça login
-3. Clique em **New Project**
-4. Preencha:
-   - **Name**: `reuni-o` (ou nome desejado)
-   - **Database Password**: Anote esta senha!
-   - **Region**: Selecione a mais próxima
-
-### 3.2 Criar Tabelas
-
-Execute os seguintes SQLs no **SQL Editor** do Supabase:
-
-#### Tabela: branches (Filiais)
+### 3.1 Criar Banco de Dados
 
 ```sql
-CREATE TABLE branches (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    location TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+CREATE DATABASE reunio CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'reunio_user'@'localhost' IDENTIFIED BY 'sua_senha_segura';
+GRANT ALL PRIVILEGES ON reunio.* TO 'reunio_user'@'localhost';
+FLUSH PRIVILEGES;
 ```
 
-#### Tabela: rooms (Salas)
+### 3.2 Configurar Conexão
 
-```sql
-CREATE TABLE rooms (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    branch_id UUID REFERENCES branches(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    capacity INTEGER DEFAULT 10,
-    color TEXT DEFAULT '#3B82F6',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+A conexão é feita via Prisma. Configure a URL no arquivo `.env.local`:
+
+```env
+DATABASE_URL="mysql://reunio_user:sua_senha_segura@localhost:3306/reunio"
 ```
 
-#### Tabela: bookings (Reservas)
+### 3.3 Aplicar Migrações
 
-```sql
-CREATE TABLE bookings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    room_id UUID REFERENCES rooms(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    description TEXT,
-    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    end_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    creator_name TEXT,
-    creator_email TEXT,
-    user_id UUID,
-    status TEXT DEFAULT 'confirmed',
-    is_recurring BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+```bash
+# Gerar cliente Prisma
+npx prisma generate
+
+# Aplicar schema ao banco (desenvolvimento)
+npx prisma db push
+
+# OU criar migração formal (produção)
+npx prisma migrate dev --name init
 ```
-
-#### Tabela: admin_deletion_logs (Logs de Exclusão)
-
-```sql
-CREATE TABLE admin_deletion_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    booking_id UUID NOT NULL,
-    booking_title TEXT NOT NULL,
-    booking_start_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    booking_end_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    room_name TEXT NOT NULL,
-    creator_name TEXT,
-    creator_email TEXT,
-    deleted_by TEXT NOT NULL,
-    deletion_reason TEXT,
-    deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-```
-
-#### View: booking_details
-
-```sql
-CREATE OR REPLACE VIEW booking_details AS
-SELECT 
-    b.id,
-    b.title,
-    b.description,
-    b.start_time,
-    b.end_time,
-    b.creator_name,
-    b.creator_email,
-    b.user_id,
-    b.status,
-    b.is_recurring,
-    b.created_at,
-    b.room_id,
-    r.name AS room_name,
-    r.color AS room_color,
-    r.branch_id,
-    br.name AS branch_name
-FROM bookings b
-JOIN rooms r ON b.room_id = r.id
-JOIN branches br ON r.branch_id = br.id;
-```
-
-### 3.3 Habilitar RLS (Row Level Security)
-
-```sql
--- Habilitar RLS
-ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
-ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE admin_deletion_logs ENABLE ROW LEVEL SECURITY;
-
--- Políticas públicas (ajuste conforme necessário)
-CREATE POLICY "Allow all for branches" ON branches FOR ALL USING (true);
-CREATE POLICY "Allow all for rooms" ON rooms FOR ALL USING (true);
-CREATE POLICY "Allow all for bookings" ON bookings FOR ALL USING (true);
-CREATE POLICY "Allow all for admin_deletion_logs" ON admin_deletion_logs FOR ALL USING (true);
-```
-
-### 3.4 Obter Credenciais
-
-1. No Supabase, vá em **Settings > API**
-2. Copie:
-   - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
-   - **anon public** → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
 ## 4. Configurar Resend (Email)
 
@@ -162,15 +69,30 @@ CREATE POLICY "Allow all for admin_deletion_logs" ON admin_deletion_logs FOR ALL
 Crie um arquivo `.env.local` na raiz do projeto:
 
 ```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+# Banco de Dados
+DATABASE_URL="mysql://user:password@host:3306/database"
+
+# NextAuth
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=gere_uma_chave_com_openssl_rand_base64_32
+
+# Admin (Fallback - usado até criar primeiro admin no banco)
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=sua_senha_admin_segura
 
 # Resend (Email)
 RESEND_API_KEY=re_xxxxxxxxxxxx
+EMAIL_FROM=reservas@seudominio.com.br
+ALLOWED_EMAIL_DOMAIN=seudominio.com.br
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+### Gerar NEXTAUTH_SECRET
+
+```bash
+openssl rand -base64 32
 ```
 
 ## 6. Executar em Desenvolvimento
@@ -196,6 +118,9 @@ npm start
 | `npm run build` | Build de produção |
 | `npm start` | Iniciar produção |
 | `npm run lint` | Verificar código |
+| `npx prisma studio` | Interface visual do banco |
+| `npx prisma db push` | Sincronizar schema |
+| `npx prisma generate` | Regenerar cliente |
 
 ## Solução de Problemas
 
@@ -206,14 +131,21 @@ rm -rf node_modules package-lock.json
 npm install
 ```
 
-### Erro de conexão com Supabase
+### Erro de conexão com MySQL
 
-1. Verifique se as variáveis de ambiente estão corretas
-2. Confirme que o projeto Supabase está ativo
-3. Verifique se as tabelas foram criadas
+1. Verifique se o MySQL está rodando
+2. Confirme usuário/senha na `DATABASE_URL`
+3. Verifique se o banco existe
+4. Execute `npx prisma db push` novamente
 
 ### Erro no envio de email
 
 1. Verifique a chave API do Resend
 2. Confirme que o domínio está verificado
 3. Para testes, use `onboarding@resend.dev` como remetente
+
+### Erro de autenticação
+
+1. Verifique se `NEXTAUTH_SECRET` está configurado
+2. Confirme que `NEXTAUTH_URL` corresponde à URL de acesso
+3. Reinicie o servidor após alterar variáveis
