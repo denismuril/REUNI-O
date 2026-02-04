@@ -14,11 +14,12 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 
-interface DatePickerProps {
+export interface DatePickerProps {
     date: Date | undefined;
     onSelect: (date: Date | undefined) => void;
     placeholder?: string;
     disabled?: boolean;
+    minDate?: Date;
 }
 
 export function DatePicker({
@@ -26,6 +27,7 @@ export function DatePicker({
     onSelect,
     placeholder = "Selecione uma data",
     disabled = false,
+    minDate,
 }: DatePickerProps) {
     return (
         <Popover>
@@ -49,8 +51,10 @@ export function DatePicker({
                     onSelect={onSelect}
                     initialFocus
                     locale={ptBR}
+                    disabled={minDate ? { before: minDate } : undefined}
                 />
             </PopoverContent>
         </Popover>
     );
 }
+
