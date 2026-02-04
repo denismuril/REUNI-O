@@ -52,7 +52,7 @@ export async function sendBookingConfirmationEmail(data: SendBookingEmailProps) 
         });
 
         const { data: emailData, error } = await resend.emails.send({
-            from: 'RESERVA <noreply@bexp.com.br>',
+            from: 'RESERVA <noreply@reuniao.bexp.com.br>',
             to: data.to,
             subject: `Confirmação de Reserva: ${data.title}`,
             html: html,
@@ -96,7 +96,7 @@ export async function sendBookingCancellationEmail(data: SendBookingEmailProps) 
         });
 
         await resend.emails.send({
-            from: 'RESERVA <noreply@bexp.com.br>',
+            from: 'RESERVA <noreply@reuniao.bexp.com.br>',
             to: data.to,
             subject: `Cancelamento: ${data.title}`,
             html: html,
