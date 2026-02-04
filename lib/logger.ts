@@ -1,10 +1,9 @@
 /**
  * Logger de Acesso - Registra ações do sistema para auditoria
  * 
- * Ações são salvas na tabela `access_logs` do Supabase
+ * Implementação simplificada que loga no console.
+ * Para produção, pode ser integrado com serviços como DataDog, LogRocket, etc.
  */
-
-import { createClient } from "@/lib/supabase/server";
 
 export type LogAction =
     | "login"
@@ -26,6 +25,15 @@ interface LogDetails {
     [key: string]: unknown;
 }
 
+interface AccessLog {
+    id: string;
+    userEmail: string | null;
+    action: LogAction;
+    details: LogDetails;
+    ipAddress: string | null;
+    createdAt: Date;
+}
+
 /**
  * Registra uma ação no log de acesso
  */
@@ -36,19 +44,20 @@ export async function logAccess(
     ipAddress?: string
 ): Promise<{ success: boolean; error?: string }> {
     try {
-        const supabase = await createClient();
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (supabase.from("access_logs") as any).insert({
-            user_email: userEmail,
+        const logEntry = {
+            timestamp: new Date().toISOString(),
             action,
+            userEmail,
             details: details || {},
-            ip_address: ipAddress || null,
-        });
+            ipAddress: ipAddress || null,
+        };
 
-        if (error) {
-            console.error("[Logger] Erro ao salvar log:", error);
-            return { success: false, error: error.message };
+        // Log no console em desenvolvimento
+        if (process.env.NODE_ENV === "development") {
+            console.log("[Logger]", JSON.stringify(logEntry, null, 2));
+        } else {
+            // Em produção, log simplificado
+            console.log(`[Logger] ${action} - ${userEmail || "anonymous"}`);
         }
 
         return { success: true };
@@ -59,54 +68,18 @@ export async function logAccess(
 }
 
 /**
- * Busca logs de acesso com filtros
+ * Busca logs de acesso (stub - retorna array vazio)
+ * 
+ * Esta implementação não persiste logs.
+ * Para funcionalidade completa, integre com um banco de dados.
  */
-export async function getAccessLogs(options?: {
+export async function getAccessLogs(_options?: {
     userEmail?: string;
     action?: LogAction;
     startDate?: Date;
     endDate?: Date;
     limit?: number;
-}): Promise<{ data: unknown[]; error?: string }> {
-    try {
-        const supabase = await createClient();
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let query = (supabase.from("access_logs") as any)
-            .select("*")
-            .order("created_at", { ascending: false });
-
-        if (options?.userEmail) {
-            query = query.eq("user_email", options.userEmail);
-        }
-
-        if (options?.action) {
-            query = query.eq("action", options.action);
-        }
-
-        if (options?.startDate) {
-            query = query.gte("created_at", options.startDate.toISOString());
-        }
-
-        if (options?.endDate) {
-            query = query.lte("created_at", options.endDate.toISOString());
-        }
-
-        if (options?.limit) {
-            query = query.limit(options.limit);
-        } else {
-            query = query.limit(100);
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-            return { data: [], error: error.message };
-        }
-
-        return { data: data || [] };
-    } catch (err) {
-        console.error("[Logger] Erro ao buscar logs:", err);
-        return { data: [], error: "Erro interno ao buscar logs" };
-    }
+}): Promise<{ data: AccessLog[]; error?: string }> {
+    // Retorna array vazio - logs não são persistidos nesta implementação
+    return { data: [] };
 }
