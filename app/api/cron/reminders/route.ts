@@ -63,7 +63,7 @@ export async function GET(request: Request) {
 
                 if (process.env.RESEND_API_KEY) {
                     await resend.emails.send({
-                        from: "RESERVA <noreply@bexp.com.br>",
+                        from: "RESERVA <noreply@reuniao.bexp.com.br>",
                         to: booking.creatorEmail,
                         subject: `Lembrete: ${booking.title} começa em 1 hora`,
                         html: html,

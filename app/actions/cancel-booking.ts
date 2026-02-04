@@ -68,7 +68,7 @@ export async function requestCancellation(bookingId: string, email: string) {
         if (process.env.RESEND_API_KEY) {
             try {
                 await resend.emails.send({
-                    from: 'RESERVA <noreply@bexp.com.br>',
+                    from: 'RESERVA <noreply@reuniao.bexp.com.br>',
                     to: email,
                     subject: 'Código de Cancelamento de Reserva',
                     html: `
