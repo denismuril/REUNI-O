@@ -72,19 +72,22 @@ interface EmailContent {
 function generateEmailContent(payload: EmailNotificationPayload): EmailContent {
     const { type, booking, recipientName } = payload;
 
-    // Handle potentially null fields from Supabase view
-    const startTimeStr = booking.start_time || new Date().toISOString();
-    const endTimeStr = booking.end_time || new Date().toISOString();
+    // Handle Date objects from Prisma
+    const startTimeDate = booking.startTime instanceof Date ? booking.startTime : new Date(booking.startTime);
+    const endTimeDate = booking.endTime instanceof Date ? booking.endTime : new Date(booking.endTime);
 
-    const bookingDate = new Date(startTimeStr).toLocaleDateString("pt-BR");
-    const startTime = new Date(startTimeStr).toLocaleTimeString("pt-BR", {
+    const bookingDate = startTimeDate.toLocaleDateString("pt-BR");
+    const startTime = startTimeDate.toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
     });
-    const endTime = new Date(endTimeStr).toLocaleTimeString("pt-BR", {
+    const endTime = endTimeDate.toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
     });
+
+    const roomName = booking.room?.name || 'Sala';
+    const branchName = booking.room?.branch?.name || 'Filial';
 
     switch (type) {
         case "booking_created":
@@ -97,15 +100,15 @@ function generateEmailContent(payload: EmailNotificationPayload): EmailContent {
             <p>Sua reserva foi confirmada com sucesso.</p>
             <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
               <p><strong>📋 Título:</strong> ${booking.title}</p>
-              <p><strong>📍 Sala:</strong> ${booking.room_name}</p>
-              <p><strong>🏢 Filial:</strong> ${booking.branch_name}</p>
+              <p><strong>📍 Sala:</strong> ${roomName}</p>
+              <p><strong>🏢 Filial:</strong> ${branchName}</p>
               <p><strong>📅 Data:</strong> ${bookingDate}</p>
               <p><strong>🕐 Horário:</strong> ${startTime} - ${endTime}</p>
             </div>
             <p>Até lá!</p>
           </div>
         `,
-                text: `Reserva Confirmada: ${booking.title}\n\nSala: ${booking.room_name}\nData: ${bookingDate}\nHorário: ${startTime} - ${endTime}`,
+                text: `Reserva Confirmada: ${booking.title}\n\nSala: ${roomName}\nData: ${bookingDate}\nHorário: ${startTime} - ${endTime}`,
             };
 
         case "booking_updated":
@@ -118,13 +121,13 @@ function generateEmailContent(payload: EmailNotificationPayload): EmailContent {
             <p>Sua reserva foi atualizada.</p>
             <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
               <p><strong>📋 Título:</strong> ${booking.title}</p>
-              <p><strong>📍 Sala:</strong> ${booking.room_name}</p>
+              <p><strong>📍 Sala:</strong> ${roomName}</p>
               <p><strong>📅 Data:</strong> ${bookingDate}</p>
               <p><strong>🕐 Horário:</strong> ${startTime} - ${endTime}</p>
             </div>
           </div>
         `,
-                text: `Reserva Atualizada: ${booking.title}\n\nNovos dados:\nSala: ${booking.room_name}\nData: ${bookingDate}\nHorário: ${startTime} - ${endTime}`,
+                text: `Reserva Atualizada: ${booking.title}\n\nNovos dados:\nSala: ${roomName}\nData: ${bookingDate}\nHorário: ${startTime} - ${endTime}`,
             };
 
         case "booking_cancelled":
@@ -137,13 +140,13 @@ function generateEmailContent(payload: EmailNotificationPayload): EmailContent {
             <p>A seguinte reserva foi cancelada:</p>
             <div style="background: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0;">
               <p><strong>📋 Título:</strong> ${booking.title}</p>
-              <p><strong>📍 Sala:</strong> ${booking.room_name}</p>
+              <p><strong>📍 Sala:</strong> ${roomName}</p>
               <p><strong>📅 Data:</strong> ${bookingDate}</p>
               <p><strong>🕐 Horário:</strong> ${startTime} - ${endTime}</p>
             </div>
           </div>
         `,
-                text: `Reserva Cancelada: ${booking.title}\n\nSala: ${booking.room_name}\nData: ${bookingDate}\nHorário: ${startTime} - ${endTime}`,
+                text: `Reserva Cancelada: ${booking.title}\n\nSala: ${roomName}\nData: ${bookingDate}\nHorário: ${startTime} - ${endTime}`,
             };
 
         case "booking_reminder":
@@ -156,13 +159,13 @@ function generateEmailContent(payload: EmailNotificationPayload): EmailContent {
             <p>Sua reunião começa em breve!</p>
             <div style="background: #fffbeb; padding: 20px; border-radius: 8px; margin: 20px 0;">
               <p><strong>📋 Título:</strong> ${booking.title}</p>
-              <p><strong>📍 Sala:</strong> ${booking.room_name}</p>
-              <p><strong>🏢 Filial:</strong> ${booking.branch_name}</p>
+              <p><strong>📍 Sala:</strong> ${roomName}</p>
+              <p><strong>🏢 Filial:</strong> ${branchName}</p>
               <p><strong>🕐 Horário:</strong> ${startTime}</p>
             </div>
           </div>
         `,
-                text: `Lembrete: ${booking.title}\n\nSua reunião começa às ${startTime} na sala ${booking.room_name}.`,
+                text: `Lembrete: ${booking.title}\n\nSua reunião começa às ${startTime} na sala ${roomName}.`,
             };
 
         default:
