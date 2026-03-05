@@ -104,8 +104,12 @@ export function generateRecurringDates(
     options?: {
         endDate?: Date;
         monthsAhead?: number;
-        daysOfWeek?: number[]; // 0-6
-        monthlyPattern?: 'same_day' | 'same_weekday'; // Padrão mensal
+        daysOfWeek?: number[]; // 0-6 (custom)
+        monthlyPattern?: 'same_day' | 'same_weekday';
+        weeklyDayOfWeek?: number; // 0-6 Dia da semana explícito (weekly)
+        monthlyDay?: number; // 1-31 Dia do mês explícito (monthly same_day)
+        monthlyWeekdayOccurrence?: number; // 1-5 (monthly same_weekday)
+        monthlyWeekdayNumber?: number; // 0-6 (monthly same_weekday)
     }
 ): Date[] {
     const dates: Date[] = [];
@@ -122,8 +126,8 @@ export function generateRecurringDates(
 
     // Para mensal com same_weekday, usamos lógica especial
     if (recurrenceType === 'monthly' && options?.monthlyPattern === 'same_weekday') {
-        const targetDayOfWeek = startDate.getDay();
-        const targetOccurrence = getWeekdayOccurrence(startDate);
+        const targetDayOfWeek = options?.monthlyWeekdayNumber ?? startDate.getDay();
+        const targetOccurrence = options?.monthlyWeekdayOccurrence ?? getWeekdayOccurrence(startDate);
 
         // Iterar mês a mês a partir do mês seguinte
         let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 1);
@@ -152,6 +156,11 @@ export function generateRecurringDates(
     // Começar do dia SEGUINTE para evitar duplicação da reserva principal
     currentDate.setDate(currentDate.getDate() + 1);
 
+    // Para weekly, usar o dia explícito ou o dia da data de início
+    const weeklyTarget = options?.weeklyDayOfWeek ?? startDate.getDay();
+    // Para monthly same_day, usar o dia explícito ou o dia do mês de início
+    const monthlyDayTarget = options?.monthlyDay ?? startDate.getDate();
+
     while (currentDate <= finalDate) {
         const dayOfWeek = currentDate.getDay(); // 0 (Dom) - 6 (Sáb)
 
@@ -163,12 +172,12 @@ export function generateRecurringDates(
                 shouldAdd = dayOfWeek >= 1 && dayOfWeek <= 5;
                 break;
             case 'weekly':
-                // Mesmo dia da semana da data original
-                shouldAdd = dayOfWeek === startDate.getDay();
+                // Dia da semana escolhido pelo usuário
+                shouldAdd = dayOfWeek === weeklyTarget;
                 break;
             case 'monthly':
-                // Mesmo dia do mês (same_day ou padrão)
-                if (currentDate.getDate() === startDate.getDate()) {
+                // Dia do mês escolhido pelo usuário (same_day ou padrão)
+                if (currentDate.getDate() === monthlyDayTarget) {
                     shouldAdd = true;
                 }
                 break;
@@ -190,3 +199,4 @@ export function generateRecurringDates(
 
     return dates;
 }
+

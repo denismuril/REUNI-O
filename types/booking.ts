@@ -83,6 +83,10 @@ export interface BookingFormData {
     recurrenceEndDate?: Date; // Data final para a recorrência
     selectedDaysOfWeek?: number[]; // 0-6 Para dias da semana (custom)
     monthlyPattern?: MonthlyPattern; // Padrão mensal: mesmo dia ou mesma semana/dia
+    weeklyDayOfWeek?: number; // 0-6 Dia da semana escolhido (weekly)
+    monthlyDay?: number; // 1-31 Dia do mês (monthly same_day)
+    monthlyWeekdayOccurrence?: number; // 1-5 Qual ocorrência (1ª, 2ª, etc.)
+    monthlyWeekdayNumber?: number; // 0-6 Dia da semana (monthly same_weekday)
 }
 
 export interface BookingFormProps {

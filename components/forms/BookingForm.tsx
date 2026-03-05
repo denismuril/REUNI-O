@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/card";
 
 import { BUSINESS_HOURS } from "@/types/booking";
-import { combineDateAndTime, getWeekdayOccurrence, getOrdinalPtBR, getWeekdayNamePtBR } from "@/lib/utils";
+import { combineDateAndTime } from "@/lib/utils";
 import { createBooking, getBranches, getRoomsByBranch } from "@/app/actions/booking";
 
 // Tipos locais para branch e room (vindo das server actions)
@@ -66,6 +66,10 @@ const bookingFormSchema = z
         recurrenceEndDate: z.date().optional(),
         selectedDaysOfWeek: z.array(z.number()).optional(),
         monthlyPattern: z.enum(["same_day", "same_weekday"]).optional(),
+        weeklyDayOfWeek: z.number().min(0).max(6).optional(),
+        monthlyDay: z.number().min(1).max(31).optional(),
+        monthlyWeekdayOccurrence: z.number().min(1).max(5).optional(),
+        monthlyWeekdayNumber: z.number().min(0).max(6).optional(),
     })
     .refine(
         (data) => {
@@ -104,6 +108,18 @@ const bookingFormSchema = z
     )
     .refine(
         (data) => {
+            if (data.recurrence === "weekly" && data.weeklyDayOfWeek === undefined) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message: "Selecione o dia da semana",
+            path: ["weeklyDayOfWeek"],
+        }
+    )
+    .refine(
+        (data) => {
             if (data.recurrence === "monthly" && !data.monthlyPattern) {
                 return false;
             }
@@ -112,6 +128,31 @@ const bookingFormSchema = z
         {
             message: "Selecione o padrão de repetição mensal",
             path: ["monthlyPattern"],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.recurrence === "monthly" && data.monthlyPattern === "same_day" && !data.monthlyDay) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message: "Informe o dia do mês",
+            path: ["monthlyDay"],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.recurrence === "monthly" && data.monthlyPattern === "same_weekday" &&
+                (data.monthlyWeekdayOccurrence === undefined || data.monthlyWeekdayNumber === undefined)) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message: "Selecione a ocorrência e o dia da semana",
+            path: ["monthlyWeekdayOccurrence"],
         }
     );
 
@@ -178,6 +219,10 @@ export function BookingForm({
             endTime: "10:00",
             recurrence: "none",
             monthlyPattern: undefined,
+            weeklyDayOfWeek: undefined,
+            monthlyDay: undefined,
+            monthlyWeekdayOccurrence: undefined,
+            monthlyWeekdayNumber: undefined,
         },
     });
 
@@ -185,6 +230,7 @@ export function BookingForm({
     const selectedRecurrence = watch("recurrence");
     const selectedStartTime = watch("startTime");
     const selectedDate = watch("date");
+    const selectedMonthlyPattern = watch("monthlyPattern");
 
     // Carrega filiais ao montar o componente via server action
     useEffect(() => {
@@ -230,7 +276,6 @@ export function BookingForm({
             const startDateTime = combineDateAndTime(data.date, data.startTime);
             const endDateTime = combineDateAndTime(data.date, data.endTime);
 
-            // Se for custom, garante que selectedDaysOfWeek está preenchido
             const recurrenceDays = data.recurrence === 'custom' ? data.selectedDaysOfWeek : undefined;
             const recurrenceEnd = data.recurrenceEndDate;
 
@@ -247,6 +292,10 @@ export function BookingForm({
                 recurrenceEndDate: recurrenceEnd ? recurrenceEnd.toISOString() : undefined,
                 selectedDaysOfWeek: recurrenceDays,
                 monthlyPattern: data.recurrence === "monthly" ? data.monthlyPattern : undefined,
+                weeklyDayOfWeek: data.recurrence === "weekly" ? data.weeklyDayOfWeek : undefined,
+                monthlyDay: data.recurrence === "monthly" && data.monthlyPattern === "same_day" ? data.monthlyDay : undefined,
+                monthlyWeekdayOccurrence: data.recurrence === "monthly" && data.monthlyPattern === "same_weekday" ? data.monthlyWeekdayOccurrence : undefined,
+                monthlyWeekdayNumber: data.recurrence === "monthly" && data.monthlyPattern === "same_weekday" ? data.monthlyWeekdayNumber : undefined,
             });
 
             if (!result.success) {
@@ -485,16 +534,13 @@ export function BookingForm({
                                 render={({ field }) => (
                                     <Select value={field.value} onValueChange={(value) => {
                                         field.onChange(value);
-                                        // Reset campos dependentes ao trocar tipo
-                                        if (value !== "monthly") {
-                                            setValue("monthlyPattern", undefined);
-                                        }
-                                        if (value !== "custom") {
-                                            setValue("selectedDaysOfWeek", undefined);
-                                        }
-                                        if (value === "monthly" && selectedDate) {
-                                            setValue("monthlyPattern", "same_day");
-                                        }
+                                        // Reset todos os campos dependentes ao trocar tipo
+                                        setValue("monthlyPattern", undefined);
+                                        setValue("selectedDaysOfWeek", undefined);
+                                        setValue("weeklyDayOfWeek", undefined);
+                                        setValue("monthlyDay", undefined);
+                                        setValue("monthlyWeekdayOccurrence", undefined);
+                                        setValue("monthlyWeekdayNumber", undefined);
                                     }}>
                                         <SelectTrigger>
                                             <SelectValue />
@@ -521,38 +567,158 @@ export function BookingForm({
                                     </p>
                                 )}
 
-                                {/* Info contextual para Semanal */}
-                                {selectedRecurrence === "weekly" && selectedDate && (
-                                    <p className="text-sm text-muted-foreground bg-blue-50 dark:bg-blue-950/30 p-3 rounded-md border border-blue-200 dark:border-blue-800">
-                                        📅 A reunião será repetida <strong>toda {getWeekdayNamePtBR(selectedDate.getDay())}</strong> até a data final selecionada abaixo.
-                                    </p>
+                                {/* Seletor de dia da semana para Semanal */}
+                                {selectedRecurrence === "weekly" && (
+                                    <div className="space-y-2">
+                                        <Label>Repetir toda:</Label>
+                                        <Controller
+                                            name="weeklyDayOfWeek"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, index) => {
+                                                        const isSelected = field.value === index;
+                                                        return (
+                                                            <Button
+                                                                key={index}
+                                                                type="button"
+                                                                variant={isSelected ? "default" : "outline"}
+                                                                size="sm"
+                                                                className={`w-10 h-10 p-0 ${isSelected ? 'bg-primary text-primary-foreground' : ''}`}
+                                                                onClick={() => field.onChange(index)}
+                                                            >
+                                                                {day}
+                                                            </Button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        />
+                                        {errors.weeklyDayOfWeek && (
+                                            <p className="text-sm text-destructive">{errors.weeklyDayOfWeek.message}</p>
+                                        )}
+                                    </div>
                                 )}
 
-                                {/* Seletor de padrão mensal */}
-                                {selectedRecurrence === "monthly" && selectedDate && (
-                                    <div className="space-y-2">
+                                {/* Configuração mensal */}
+                                {selectedRecurrence === "monthly" && (
+                                    <div className="space-y-3">
                                         <Label>Padrão de Repetição:</Label>
                                         <Controller
                                             name="monthlyPattern"
                                             control={control}
                                             render={({ field }) => (
-                                                <Select value={field.value || ""} onValueChange={field.onChange}>
+                                                <Select value={field.value || ""} onValueChange={(val) => {
+                                                    field.onChange(val);
+                                                    // Reset sub-campos ao trocar padrão
+                                                    setValue("monthlyDay", undefined);
+                                                    setValue("monthlyWeekdayOccurrence", undefined);
+                                                    setValue("monthlyWeekdayNumber", undefined);
+                                                }}>
                                                     <SelectTrigger>
                                                         <SelectValue placeholder="Selecione o padrão" />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="same_day">
-                                                            Dia {selectedDate.getDate()} de cada mês
-                                                        </SelectItem>
-                                                        <SelectItem value="same_weekday">
-                                                            Na {getOrdinalPtBR(getWeekdayOccurrence(selectedDate))} {getWeekdayNamePtBR(selectedDate.getDay())} de cada mês
-                                                        </SelectItem>
+                                                        <SelectItem value="same_day">No dia específico do mês</SelectItem>
+                                                        <SelectItem value="same_weekday">Em um dia da semana específico</SelectItem>
                                                     </SelectContent>
                                                 </Select>
                                             )}
                                         />
                                         {errors.monthlyPattern && (
                                             <p className="text-sm text-destructive">{errors.monthlyPattern.message}</p>
+                                        )}
+
+                                        {/* Dia do mês (same_day) */}
+                                        {selectedMonthlyPattern === "same_day" && (
+                                            <div className="space-y-2">
+                                                <Label>Dia do mês:</Label>
+                                                <Controller
+                                                    name="monthlyDay"
+                                                    control={control}
+                                                    render={({ field }) => (
+                                                        <Select
+                                                            value={field.value?.toString() || ""}
+                                                            onValueChange={(val) => field.onChange(parseInt(val))}
+                                                        >
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder="Selecione o dia" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                                                    <SelectItem key={day} value={day.toString()}>
+                                                                        Dia {day}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    )}
+                                                />
+                                                {errors.monthlyDay && (
+                                                    <p className="text-sm text-destructive">{errors.monthlyDay.message}</p>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Ocorrência + dia da semana (same_weekday) */}
+                                        {selectedMonthlyPattern === "same_weekday" && (
+                                            <div className="space-y-2">
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div className="space-y-1">
+                                                        <Label className="text-xs">Ocorrência:</Label>
+                                                        <Controller
+                                                            name="monthlyWeekdayOccurrence"
+                                                            control={control}
+                                                            render={({ field }) => (
+                                                                <Select
+                                                                    value={field.value?.toString() || ""}
+                                                                    onValueChange={(val) => field.onChange(parseInt(val))}
+                                                                >
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Qual" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="1">1ª (Primeira)</SelectItem>
+                                                                        <SelectItem value="2">2ª (Segunda)</SelectItem>
+                                                                        <SelectItem value="3">3ª (Terceira)</SelectItem>
+                                                                        <SelectItem value="4">4ª (Quarta)</SelectItem>
+                                                                        <SelectItem value="5">5ª (Quinta)</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <Label className="text-xs">Dia da semana:</Label>
+                                                        <Controller
+                                                            name="monthlyWeekdayNumber"
+                                                            control={control}
+                                                            render={({ field }) => (
+                                                                <Select
+                                                                    value={field.value?.toString() || ""}
+                                                                    onValueChange={(val) => field.onChange(parseInt(val))}
+                                                                >
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Dia" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="0">Domingo</SelectItem>
+                                                                        <SelectItem value="1">Segunda-feira</SelectItem>
+                                                                        <SelectItem value="2">Terça-feira</SelectItem>
+                                                                        <SelectItem value="3">Quarta-feira</SelectItem>
+                                                                        <SelectItem value="4">Quinta-feira</SelectItem>
+                                                                        <SelectItem value="5">Sexta-feira</SelectItem>
+                                                                        <SelectItem value="6">Sábado</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                {errors.monthlyWeekdayOccurrence && (
+                                                    <p className="text-sm text-destructive">{errors.monthlyWeekdayOccurrence.message}</p>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
                                 )}

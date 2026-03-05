@@ -34,6 +34,10 @@ const bookingSchema = z.object({
     recurrenceEndDate: z.string().datetime().optional().nullable(),
     selectedDaysOfWeek: z.array(z.number().min(0).max(6)).optional(),
     monthlyPattern: z.enum(["same_day", "same_weekday"]).optional().nullable(),
+    weeklyDayOfWeek: z.number().min(0).max(6).optional().nullable(),
+    monthlyDay: z.number().min(1).max(31).optional().nullable(),
+    monthlyWeekdayOccurrence: z.number().min(1).max(5).optional().nullable(),
+    monthlyWeekdayNumber: z.number().min(0).max(6).optional().nullable(),
 });
 
 export type BookingInput = z.infer<typeof bookingSchema>;
@@ -131,6 +135,10 @@ export async function createBooking(input: BookingInput): Promise<BookingResult>
             endDate: data.recurrenceEndDate ? new Date(data.recurrenceEndDate) : undefined,
             daysOfWeek: data.selectedDaysOfWeek,
             monthlyPattern: data.monthlyPattern || undefined,
+            weeklyDayOfWeek: data.weeklyDayOfWeek ?? undefined,
+            monthlyDay: data.monthlyDay ?? undefined,
+            monthlyWeekdayOccurrence: data.monthlyWeekdayOccurrence ?? undefined,
+            monthlyWeekdayNumber: data.monthlyWeekdayNumber ?? undefined,
         };
 
         recurringDates = generateRecurringDates(
