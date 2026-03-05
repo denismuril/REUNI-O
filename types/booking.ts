@@ -68,6 +68,8 @@ export interface CalendarEvent {
 
 export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'custom';
 
+export type MonthlyPattern = 'same_day' | 'same_weekday';
+
 export interface BookingFormData {
     branchId: string;
     roomId: string;
@@ -80,6 +82,7 @@ export interface BookingFormData {
     recurrence: RecurrenceType;
     recurrenceEndDate?: Date; // Data final para a recorrência
     selectedDaysOfWeek?: number[]; // 0-6 Para dias da semana (custom)
+    monthlyPattern?: MonthlyPattern; // Padrão mensal: mesmo dia ou mesma semana/dia
 }
 
 export interface BookingFormProps {

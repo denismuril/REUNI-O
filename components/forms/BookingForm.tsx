@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/card";
 
 import { BUSINESS_HOURS } from "@/types/booking";
-import { combineDateAndTime } from "@/lib/utils";
+import { combineDateAndTime, getWeekdayOccurrence, getOrdinalPtBR, getWeekdayNamePtBR } from "@/lib/utils";
 import { createBooking, getBranches, getRoomsByBranch } from "@/app/actions/booking";
 
 // Tipos locais para branch e room (vindo das server actions)
@@ -65,6 +65,7 @@ const bookingFormSchema = z
         recurrence: z.enum(["none", "daily", "weekly", "monthly", "custom"]),
         recurrenceEndDate: z.date().optional(),
         selectedDaysOfWeek: z.array(z.number()).optional(),
+        monthlyPattern: z.enum(["same_day", "same_weekday"]).optional(),
     })
     .refine(
         (data) => {
@@ -99,6 +100,18 @@ const bookingFormSchema = z
         {
             message: "Selecione a data final da recorrência",
             path: ["recurrenceEndDate"],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.recurrence === "monthly" && !data.monthlyPattern) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message: "Selecione o padrão de repetição mensal",
+            path: ["monthlyPattern"],
         }
     );
 
@@ -164,12 +177,14 @@ export function BookingForm({
             startTime: initialTime || "09:00",
             endTime: "10:00",
             recurrence: "none",
+            monthlyPattern: undefined,
         },
     });
 
     const selectedBranchId = watch("branchId");
     const selectedRecurrence = watch("recurrence");
     const selectedStartTime = watch("startTime");
+    const selectedDate = watch("date");
 
     // Carrega filiais ao montar o componente via server action
     useEffect(() => {
@@ -231,6 +246,7 @@ export function BookingForm({
                 recurrenceType: data.recurrence === "none" ? null : data.recurrence,
                 recurrenceEndDate: recurrenceEnd ? recurrenceEnd.toISOString() : undefined,
                 selectedDaysOfWeek: recurrenceDays,
+                monthlyPattern: data.recurrence === "monthly" ? data.monthlyPattern : undefined,
             });
 
             if (!result.success) {
@@ -467,13 +483,25 @@ export function BookingForm({
                                 name="recurrence"
                                 control={control}
                                 render={({ field }) => (
-                                    <Select value={field.value} onValueChange={field.onChange}>
+                                    <Select value={field.value} onValueChange={(value) => {
+                                        field.onChange(value);
+                                        // Reset campos dependentes ao trocar tipo
+                                        if (value !== "monthly") {
+                                            setValue("monthlyPattern", undefined);
+                                        }
+                                        if (value !== "custom") {
+                                            setValue("selectedDaysOfWeek", undefined);
+                                        }
+                                        if (value === "monthly" && selectedDate) {
+                                            setValue("monthlyPattern", "same_day");
+                                        }
+                                    }}>
                                         <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="none">Não repetir</SelectItem>
-                                            <SelectItem value="daily">Diariamente</SelectItem>
+                                            <SelectItem value="daily">Diariamente (Seg-Sex)</SelectItem>
                                             <SelectItem value="weekly">Semanalmente</SelectItem>
                                             <SelectItem value="monthly">Mensalmente</SelectItem>
                                             <SelectItem value="custom">Personalizado (Dias da Semana)</SelectItem>
@@ -485,6 +513,51 @@ export function BookingForm({
 
                         {selectedRecurrence !== "none" && (
                             <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
+
+                                {/* Info contextual para Diário */}
+                                {selectedRecurrence === "daily" && (
+                                    <p className="text-sm text-muted-foreground bg-blue-50 dark:bg-blue-950/30 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                                        📅 A reunião será repetida <strong>todos os dias úteis (Segunda a Sexta)</strong> até a data final selecionada abaixo.
+                                    </p>
+                                )}
+
+                                {/* Info contextual para Semanal */}
+                                {selectedRecurrence === "weekly" && selectedDate && (
+                                    <p className="text-sm text-muted-foreground bg-blue-50 dark:bg-blue-950/30 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                                        📅 A reunião será repetida <strong>toda {getWeekdayNamePtBR(selectedDate.getDay())}</strong> até a data final selecionada abaixo.
+                                    </p>
+                                )}
+
+                                {/* Seletor de padrão mensal */}
+                                {selectedRecurrence === "monthly" && selectedDate && (
+                                    <div className="space-y-2">
+                                        <Label>Padrão de Repetição:</Label>
+                                        <Controller
+                                            name="monthlyPattern"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Select value={field.value || ""} onValueChange={field.onChange}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecione o padrão" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="same_day">
+                                                            Dia {selectedDate.getDate()} de cada mês
+                                                        </SelectItem>
+                                                        <SelectItem value="same_weekday">
+                                                            Na {getOrdinalPtBR(getWeekdayOccurrence(selectedDate))} {getWeekdayNamePtBR(selectedDate.getDay())} de cada mês
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            )}
+                                        />
+                                        {errors.monthlyPattern && (
+                                            <p className="text-sm text-destructive">{errors.monthlyPattern.message}</p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Repetir até - exibido para todos os tipos */}
                                 <div className="space-y-2">
                                     <Label>Repetir até:</Label>
                                     <Controller
@@ -504,6 +577,7 @@ export function BookingForm({
                                     )}
                                 </div>
 
+                                {/* Seletor de dias da semana - apenas para Personalizado */}
                                 {selectedRecurrence === "custom" && (
                                     <div className="space-y-2">
                                         <Label>Dias da Semana:</Label>

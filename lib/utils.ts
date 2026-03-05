@@ -46,8 +46,55 @@ export function combineDateAndTime(date: Date, time: string): Date {
 }
 
 /**
- * Gera datas para recorrência diária ou semanal
+ * Retorna qual ocorrência do dia da semana é dentro do mês (1ª, 2ª, 3ª, 4ª, 5ª)
+ * Ex: Se a data é a 2ª quinta-feira do mês, retorna 2
  */
+export function getWeekdayOccurrence(date: Date): number {
+    const dayOfMonth = date.getDate();
+    return Math.ceil(dayOfMonth / 7);
+}
+
+/**
+ * Retorna a data da N-ésima ocorrência de um dia da semana em um mês/ano específico
+ * Ex: getNthWeekdayOfMonth(2026, 3, 4, 1) → 1ª quinta-feira de abril de 2026
+ * Retorna null se a ocorrência não existir (ex: 5ª segunda de fevereiro)
+ */
+export function getNthWeekdayOfMonth(year: number, month: number, dayOfWeek: number, n: number): Date | null {
+    // Primeiro dia do mês
+    const firstDay = new Date(year, month, 1);
+    // Dia da semana do primeiro dia
+    const firstDayOfWeek = firstDay.getDay();
+
+    // Calcula o dia do mês para a 1ª ocorrência desse dia da semana
+    let firstOccurrenceDay = dayOfWeek - firstDayOfWeek + 1;
+    if (firstOccurrenceDay <= 0) firstOccurrenceDay += 7;
+
+    // N-ésima ocorrência
+    const targetDay = firstOccurrenceDay + (n - 1) * 7;
+
+    // Verifica se ainda está no mesmo mês
+    const result = new Date(year, month, targetDay);
+    if (result.getMonth() !== month) return null;
+
+    return result;
+}
+
+/**
+ * Retorna o nome ordinal em português (1ª, 2ª, 3ª, etc.)
+ */
+export function getOrdinalPtBR(n: number): string {
+    const ordinals: Record<number, string> = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª', 5: '5ª' };
+    return ordinals[n] || `${n}ª`;
+}
+
+/**
+ * Retorna o nome do dia da semana em português
+ */
+export function getWeekdayNamePtBR(dayOfWeek: number): string {
+    const names = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    return names[dayOfWeek] || '';
+}
+
 /**
  * Gera datas para recorrência
  */
@@ -58,6 +105,7 @@ export function generateRecurringDates(
         endDate?: Date;
         monthsAhead?: number;
         daysOfWeek?: number[]; // 0-6
+        monthlyPattern?: 'same_day' | 'same_weekday'; // Padrão mensal
     }
 ): Date[] {
     const dates: Date[] = [];
@@ -72,13 +120,36 @@ export function generateRecurringDates(
         finalDate.setMonth(finalDate.getMonth() + (options?.monthsAhead || 3));
     }
 
-    let currentDate = new Date(startDate);
-    // Avança um dia para não incluir a data de início (que já é criada como a reserva principal)
-    // Se a lógica do backend espera que a lista inclua a data inicial ou não, isso deve ser ajustado.
-    // Assumindo aqui que geramos OS FILHOS, então começamos do próximo.
-    // PORÉM, para simplificar a lógica de "dias da semana", é mais fácil iterar dia a dia.
+    // Para mensal com same_weekday, usamos lógica especial
+    if (recurrenceType === 'monthly' && options?.monthlyPattern === 'same_weekday') {
+        const targetDayOfWeek = startDate.getDay();
+        const targetOccurrence = getWeekdayOccurrence(startDate);
 
-    // Vamos começar do dia SEGUINTE ao start date para evitar duplicação da reserva principal
+        // Iterar mês a mês a partir do mês seguinte
+        let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 1);
+
+        while (currentMonth <= finalDate) {
+            const candidate = getNthWeekdayOfMonth(
+                currentMonth.getFullYear(),
+                currentMonth.getMonth(),
+                targetDayOfWeek,
+                targetOccurrence
+            );
+
+            if (candidate && candidate <= finalDate) {
+                dates.push(candidate);
+            }
+
+            // Próximo mês
+            currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+        }
+
+        return dates;
+    }
+
+    // Para os demais tipos, iterar dia a dia
+    let currentDate = new Date(startDate);
+    // Começar do dia SEGUINTE para evitar duplicação da reserva principal
     currentDate.setDate(currentDate.getDate() + 1);
 
     while (currentDate <= finalDate) {
@@ -88,16 +159,15 @@ export function generateRecurringDates(
 
         switch (recurrenceType) {
             case 'daily':
-                shouldAdd = true;
+                // Apenas dias úteis (Segunda a Sexta)
+                shouldAdd = dayOfWeek >= 1 && dayOfWeek <= 5;
                 break;
             case 'weekly':
                 // Mesmo dia da semana da data original
                 shouldAdd = dayOfWeek === startDate.getDay();
                 break;
             case 'monthly':
-                // Mesmo dia do mês (atenção para meses com menos dias)
-                // Se start date for dia 31, em meses com 30 dias pode pular ou ajustar.
-                // Simples implementação: verifica se o dia do mês bate.
+                // Mesmo dia do mês (same_day ou padrão)
                 if (currentDate.getDate() === startDate.getDate()) {
                     shouldAdd = true;
                 }
@@ -115,8 +185,6 @@ export function generateRecurringDates(
             dates.push(new Date(currentDate));
         }
 
-        // Avança o loop
-        // Otimização: para weekly/monthly poderia pular mais, mas dia-a-dia cobre 'custom' corretamente
         currentDate.setDate(currentDate.getDate() + 1);
     }
 
