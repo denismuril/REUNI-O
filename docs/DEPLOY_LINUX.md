@@ -1,226 +1,157 @@
-# Guia de Deploy em Servidor Linux (Ubuntu/Debian)
+# Deploy Linux - reuniao.bexp.com.br
 
-Este guia descreve os passos para hospedar a aplicação **REUNI-O** em um servidor Linux usando Node.js, PM2 e Nginx, conectado ao banco de dados **MySQL**.
+Este guia usa os arquivos versionados do repositorio para subir o REUNI-O com:
 
-## 📋 Pré-requisitos
+- Next.js 14
+- PM2
+- Nginx
+- NextAuth
+- MySQL
 
-- Servidor Linux (Ubuntu 20.04 ou superior recomendado)
-- Acesso SSH ao servidor
-- Node.js 20+ e npm
-- Acesso ao banco MySQL (sgbd1.bexp.com.br já configurado)
-- Domínio configurado (opcional, mas recomendado)
-
----
-
-## 1. Preparação do Servidor
-
-Atualize o sistema e instale as dependências básicas:
+## 1. Pre-requisitos
 
 ```bash
-sudo apt update && sudo apt upgrade -y
+sudo apt update
 sudo apt install -y curl git nginx
 ```
 
-## 2. Instalação do Node.js (via NVM)
+Instale Node.js 20 e PM2:
 
 ```bash
-# Baixar instalador
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-
-# Recarregar bash
-source ~/.bashrc
-
-# Instalar Node.js LTS (Versão 20 recomendada para Next.js 14)
-nvm install 20
-nvm use 20
-nvm alias default 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+sudo npm install -g pm2
 ```
 
-Instale o PM2 (gerenciador de processos):
-
-```bash
-npm install -g pm2
-```
-
-## 3. Clone do Projeto
+## 2. Baixar o projeto
 
 ```bash
 mkdir -p ~/apps
 cd ~/apps
 git clone https://github.com/denismuril/REUNI-O.git
 cd REUNI-O
-```
-
-## 4. Instalação de Dependências
-
-```bash
 npm install
 ```
 
-## 5. Configuração de Variáveis de Ambiente
+## 3. Configurar ambiente
 
-Crie o arquivo `.env.local`:
-
-```bash
-nano .env.local
-```
-
-Cole o conteúdo abaixo (já configurado para seu ambiente):
+Crie um arquivo `.env.production.local`:
 
 ```env
-# -------------------------------------------
-# MySQL (Prisma)
-# -------------------------------------------
-DATABASE_URL="mysql://usr_leonardo:4Fy!GGnyodiE4fJRV@6x@sgbd1.bexp.com.br:3306/reuniodb"
+DATABASE_URL="mysql://usuario:senha@host:3306/reuniodb"
 
-# -------------------------------------------
-# NextAuth
-# -------------------------------------------
-NEXTAUTH_URL=https://seu-dominio.bexp.com.br
-NEXTAUTH_SECRET=gere_uma_chave_secreta_com_openssl_rand_base64_32
+NEXTAUTH_URL=https://reuniao.bexp.com.br
+NEXTAUTH_URL_INTERNAL=http://127.0.0.1:3000
+NEXTAUTH_SECRET=gere_um_segredo_forte
 
-# -------------------------------------------
-# Resend (Envio de Emails)
-# -------------------------------------------
-RESEND_API_KEY=re_Gxm1DspJ_2X3eExo6XpuvtpoRpEE8oW36
+NEXT_PUBLIC_APP_URL=https://reuniao.bexp.com.br
+PORT=3000
 
-# -------------------------------------------
-# Aplicação
-# -------------------------------------------
-NEXT_PUBLIC_APP_URL=https://seu-dominio.bexp.com.br
-
-# -------------------------------------------
-# Administração
-# -------------------------------------------
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=reuni0@2026
-
-# Domínio permitido para emails de reserva
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ALLOWED_EMAIL_DOMAIN=bexp.com.br
+
+CRON_SECRET=seu_segredo_cron_aqui
 ```
 
-> **Importante**: Gere um `NEXTAUTH_SECRET` seguro:
-> ```bash
-> openssl rand -base64 32
-> ```
+Gere um segredo seguro:
 
-## 6. Criação das Tabelas no MySQL
+```bash
+openssl rand -base64 32
+```
 
-Execute a migration do Prisma para criar as tabelas:
+Observacoes:
+
+- Nao use mais `ADMIN_USERNAME` ou `ADMIN_PASSWORD`; o painel admin usa usuarios do banco com `role = ADMIN` ou `SUPERADMIN`.
+- `NEXTAUTH_URL_INTERNAL=http://127.0.0.1:3000` ajuda o servidor a resolver callbacks localmente.
+
+## 4. Banco e build
 
 ```bash
 npx prisma migrate deploy
-```
-
-Isso vai criar as seguintes tabelas com prefixo `reunio_`:
-- `reunio_users`
-- `reunio_accounts`
-- `reunio_sessions`
-- `reunio_verification_tokens`
-- `reunio_branches`
-- `reunio_rooms`
-- `reunio_bookings`
-- `reunio_cancellation_tokens`
-
-## 7. Build da Aplicação
-
-Gere a versão otimizada para produção:
-
-```bash
 npm run build
 ```
 
-## 8. Execução com PM2
+## 5. Subir com PM2
 
-Inicie a aplicação em background:
+O repositorio inclui [ecosystem.config.js](../ecosystem.config.js).
 
 ```bash
-pm2 start npm --name "reunio" -- start
+pm2 start ecosystem.config.js
+pm2 save
+pm2 status
 ```
 
-Configure o PM2 para iniciar automaticamente no boot:
+Configure inicializacao automatica:
 
 ```bash
 pm2 startup
-# Copie e rode o comando (sudo) que o PM2 exibir
+```
+
+Execute o comando que o PM2 imprimir e depois:
+
+```bash
 pm2 save
 ```
 
-## 9. Configuração do Nginx (Proxy Reverso)
+## 6. Validar a app antes do Nginx
 
-Crie um arquivo de configuração:
-
-```bash
-sudo nano /etc/nginx/sites-available/reunio
-```
-
-Conteúdo:
-
-```nginx
-server {
-    listen 80;
-    server_name reservas.bexp.com.br; # Seu domínio
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-Ative o site:
+Teste localmente no servidor:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/reunio /etc/nginx/sites-enabled/
+curl -i http://127.0.0.1:3000/api/health
+curl -i http://127.0.0.1:3000/api/auth/signin
+```
+
+Se `127.0.0.1:3000` nao responder, o problema ainda esta no processo Node/PM2 e nao no Nginx.
+
+## 7. Configurar Nginx
+
+O repositorio inclui [deploy/nginx/reuniao.bexp.com.br.conf](../deploy/nginx/reuniao.bexp.com.br.conf).
+
+Copie o arquivo para o servidor:
+
+```bash
+sudo cp deploy/nginx/reuniao.bexp.com.br.conf /etc/nginx/sites-available/reuniao.bexp.com.br
+sudo ln -sf /etc/nginx/sites-available/reuniao.bexp.com.br /etc/nginx/sites-enabled/reuniao.bexp.com.br
 sudo nginx -t
-sudo systemctl restart nginx
+sudo systemctl reload nginx
 ```
 
-## 10. Configuração de HTTPS (SSL Gratuito)
+Importante:
+
+- Nao crie um `location /api/` separado para outro backend neste dominio.
+- `/api/auth/*` precisa chegar no Next.js para o NextAuth funcionar.
+- Se voce tiver outra API no servidor, use outro subdominio como `api.bexp.com.br` ou outro prefixo como `/backend/`.
+
+## 8. Configurar HTTPS
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d reservas.bexp.com.br
+sudo certbot --nginx -d reuniao.bexp.com.br
 ```
 
----
-
-## 📊 Dados Iniciais
-
-Após o deploy, você precisa criar pelo menos uma filial e uma sala.
-
-### Opção 1: Via Prisma Studio (Temporariamente)
+Depois recarregue:
 
 ```bash
-npx prisma studio
+sudo nginx -t
+sudo systemctl reload nginx
 ```
 
-Acesse `http://localhost:5555` e adicione:
-1. Uma filial em `reunio_branches`
-2. Uma sala em `reunio_rooms` vinculada à filial
+## 9. Testes finais
 
-### Opção 2: Via SQL direto no MySQL
-
-```sql
--- Criar filial
-INSERT INTO reunio_branches (id, name, location, timezone, is_active, created_at, updated_at) 
-VALUES (UUID(), 'BEXP Matriz', 'São Paulo, SP', 'America/Sao_Paulo', 1, NOW(), NOW());
-
--- Criar sala (substitua o branch_id pelo ID gerado acima)
-INSERT INTO reunio_rooms (id, branch_id, name, capacity, equipment_list, is_active, created_at, updated_at) 
-VALUES (UUID(), 'ID_DA_FILIAL_AQUI', 'Sala de Reunião 1', 10, '[]', 1, NOW(), NOW());
+```bash
+curl -i https://reuniao.bexp.com.br/api/health
+curl -i https://reuniao.bexp.com.br/api/auth/signin
+curl -i https://reuniao.bexp.com.br/admin
 ```
 
----
+Resultados esperados:
 
-## 🔄 Atualização
+- `/api/health` retorna JSON com `status: ok`
+- `/api/auth/signin` responde pela aplicacao NextAuth
+- `/admin` redireciona para `/login` quando nao ha sessao
+
+## 10. Atualizacao de versao
 
 ```bash
 cd ~/apps/REUNI-O
@@ -231,15 +162,21 @@ npm run build
 pm2 restart reunio
 ```
 
-## 🐛 Troubleshooting
+## 11. Troubleshooting
+
+Ver o processo:
 
 ```bash
-# Ver logs da aplicação
 pm2 logs reunio
-
-# Ver status
 pm2 status
-
-# Testar conexão com MySQL
-npx prisma db pull
+ss -ltnp | grep 3000
 ```
+
+Ver o Nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl status nginx
+```
+
+Se `https://reuniao.bexp.com.br/api/auth/error` retornar `{"detail":"Not Found"}`, a requisicao nao esta chegando no Next.js. Isso normalmente significa um `location /api/` errado ou upstream incorreto no Nginx.
