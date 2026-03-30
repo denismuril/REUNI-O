@@ -25,7 +25,7 @@ import {
     getOccupancyByRoom,
     getPeakHours,
     getTopUsers,
-    getMonthlyStats,
+    getSummaryStats,
     OccupancyStats,
     PeakHourStats,
     TopUserStats,
@@ -70,10 +70,7 @@ export default function ReportsPage() {
                     getOccupancyByRoom(startDate, endDate),
                     getPeakHours(startDate, endDate),
                     getTopUsers(10, startDate, endDate),
-                    getMonthlyStats(
-                        period === "lastMonth" ? subMonths(today, 1).getFullYear() : today.getFullYear(),
-                        period === "lastMonth" ? subMonths(today, 1).getMonth() + 1 : today.getMonth() + 1
-                    )
+                    getSummaryStats(startDate, endDate)
                 ]);
 
                 if (occupancy.data) setOccupancyData(occupancy.data);

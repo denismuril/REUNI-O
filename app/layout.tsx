@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { AuthSessionProvider } from "@/components/providers/session-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -20,11 +21,13 @@ export default function RootLayout({
     return (
         <html lang="pt-BR">
             <body className={inter.className}>
-                <TooltipProvider delayDuration={300}>
-                    <div className="min-h-screen bg-background">
-                        {children}
-                    </div>
-                </TooltipProvider>
+                <AuthSessionProvider>
+                    <TooltipProvider delayDuration={300}>
+                        <div className="min-h-screen bg-background">
+                            {children}
+                        </div>
+                    </TooltipProvider>
+                </AuthSessionProvider>
             </body>
         </html>
     );

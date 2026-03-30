@@ -3,7 +3,13 @@ import { NextResponse } from 'next/server';
 
 export default withAuth(
     function middleware(request) {
-        // Permite acesso a rotas públicas
+        const path = request.nextUrl.pathname;
+        const role = request.nextauth.token?.role;
+
+        if (path.startsWith('/admin') && role !== 'ADMIN' && role !== 'SUPERADMIN') {
+            return NextResponse.redirect(new URL('/', request.url));
+        }
+
         return NextResponse.next();
     },
     {
@@ -11,23 +17,19 @@ export default withAuth(
             authorized: ({ token, req }) => {
                 const path = req.nextUrl.pathname;
 
-                // Rotas públicas - sempre permite
-                const publicRoutes = ['/login', '/api/auth', '/api/cron'];
+                const publicRoutes = ['/login', '/api/auth', '/api/cron', '/api/send-email'];
                 if (publicRoutes.some(route => path.startsWith(route))) {
                     return true;
                 }
 
-                // Página principal - permite acesso sem login (guest booking)
                 if (path === '/') {
                     return true;
                 }
 
-                // Admin - requer autenticação
                 if (path.startsWith('/admin')) {
                     return !!token;
                 }
 
-                // Outras rotas - permite
                 return true;
             },
         },
@@ -39,13 +41,6 @@ export default withAuth(
 
 export const config = {
     matcher: [
-        /*
-         * Match all request paths except for the ones starting with:
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - favicon.ico (favicon file)
-         * - public folder
-         */
         '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };

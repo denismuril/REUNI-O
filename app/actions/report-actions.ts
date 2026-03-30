@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth";
 
 export interface OccupancyStats {
     roomId: string;
@@ -32,14 +33,22 @@ export interface MonthlyStats {
     peakDay: string;
 }
 
-/**
- * Busca estatísticas de ocupação por sala
- */
+function getDaysBetween(startDate: Date, endDate: Date) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+
+    return Math.max(1, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+}
+
 export async function getOccupancyByRoom(
     startDate: Date,
     endDate: Date
 ): Promise<{ data: OccupancyStats[]; error?: string }> {
     try {
+        await requireAdmin();
+
         const bookings = await prisma.booking.findMany({
             where: {
                 startTime: { gte: startDate },
@@ -53,7 +62,6 @@ export async function getOccupancyByRoom(
             },
         });
 
-        // Agrupar por sala
         const roomStats = new Map<string, OccupancyStats>();
 
         bookings.forEach((booking) => {
@@ -83,20 +91,19 @@ export async function getOccupancyByRoom(
                 (a, b) => b.totalBookings - a.totalBookings
             ),
         };
-    } catch (err) {
-        console.error("[Reports] Erro ao buscar ocupação:", err);
+    } catch (error) {
+        console.error("[Reports] Erro ao buscar ocupacao:", error);
         return { data: [], error: "Erro interno ao buscar dados" };
     }
 }
 
-/**
- * Busca estatísticas de horários de pico
- */
 export async function getPeakHours(
     startDate: Date,
     endDate: Date
 ): Promise<{ data: PeakHourStats[]; error?: string }> {
     try {
+        await requireAdmin();
+
         const bookings = await prisma.booking.findMany({
             where: {
                 startTime: { gte: startDate, lte: endDate },
@@ -105,10 +112,9 @@ export async function getPeakHours(
             select: { startTime: true },
         });
 
-        // Contar por hora
         const hourCounts = new Map<number, number>();
-        for (let h = 8; h <= 18; h++) {
-            hourCounts.set(h, 0);
+        for (let hour = 8; hour <= 18; hour++) {
+            hourCounts.set(hour, 0);
         }
 
         bookings.forEach((booking) => {
@@ -124,21 +130,20 @@ export async function getPeakHours(
                 bookings,
             })),
         };
-    } catch (err) {
-        console.error("[Reports] Erro ao buscar horários de pico:", err);
+    } catch (error) {
+        console.error("[Reports] Erro ao buscar horarios de pico:", error);
         return { data: [], error: "Erro interno ao buscar dados" };
     }
 }
 
-/**
- * Busca top usuários por número de reservas
- */
 export async function getTopUsers(
     limit: number = 10,
     startDate: Date,
     endDate: Date
 ): Promise<{ data: TopUserStats[]; error?: string }> {
     try {
+        await requireAdmin();
+
         const bookings = await prisma.booking.findMany({
             where: {
                 startTime: { gte: startDate },
@@ -153,11 +158,10 @@ export async function getTopUsers(
             },
         });
 
-        // Agrupar por usuário
         const userStats = new Map<string, TopUserStats>();
 
         bookings.forEach((booking) => {
-            const email = booking.creatorEmail || "Desconhecido";
+            const email = booking.creatorEmail || "desconhecido";
             const hours =
                 (booking.endTime.getTime() - booking.startTime.getTime()) /
                 (1000 * 60 * 60);
@@ -181,23 +185,18 @@ export async function getTopUsers(
                 .sort((a, b) => b.totalBookings - a.totalBookings)
                 .slice(0, limit),
         };
-    } catch (err) {
-        console.error("[Reports] Erro ao buscar top usuários:", err);
+    } catch (error) {
+        console.error("[Reports] Erro ao buscar top usuarios:", error);
         return { data: [], error: "Erro interno ao buscar dados" };
     }
 }
 
-/**
- * Busca estatísticas mensais resumidas
- */
-export async function getMonthlyStats(
-    year: number,
-    month: number
+export async function getSummaryStats(
+    startDate: Date,
+    endDate: Date
 ): Promise<{ data: MonthlyStats | null; error?: string }> {
     try {
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0, 23, 59, 59);
-        const daysInMonth = endDate.getDate();
+        await requireAdmin();
 
         const bookings = await prisma.booking.findMany({
             where: {
@@ -223,7 +222,6 @@ export async function getMonthlyStats(
             };
         }
 
-        // Calcular estatísticas
         let totalHours = 0;
         const roomCounts = new Map<string, number>();
         const dayCounts = new Map<string, number>();
@@ -234,16 +232,12 @@ export async function getMonthlyStats(
                 (1000 * 60 * 60);
             totalHours += hours;
 
-            // Contar por sala
-            const room = booking.room.name;
-            roomCounts.set(room, (roomCounts.get(room) || 0) + 1);
+            roomCounts.set(booking.room.name, (roomCounts.get(booking.room.name) || 0) + 1);
 
-            // Contar por dia
             const day = booking.startTime.toISOString().split("T")[0];
             dayCounts.set(day, (dayCounts.get(day) || 0) + 1);
         });
 
-        // Encontrar sala mais usada
         let mostUsedRoom = "N/A";
         let maxRoomCount = 0;
         roomCounts.forEach((count, room) => {
@@ -253,7 +247,6 @@ export async function getMonthlyStats(
             }
         });
 
-        // Encontrar dia de pico
         let peakDay = "N/A";
         let maxDayCount = 0;
         dayCounts.forEach((count, day) => {
@@ -272,13 +265,23 @@ export async function getMonthlyStats(
                 totalBookings: bookings.length,
                 totalHours: Math.round(totalHours * 10) / 10,
                 totalRooms: roomCounts.size,
-                avgBookingsPerDay: Math.round((bookings.length / daysInMonth) * 10) / 10,
+                avgBookingsPerDay: Math.round((bookings.length / getDaysBetween(startDate, endDate)) * 10) / 10,
                 mostUsedRoom,
                 peakDay,
             },
         };
-    } catch (err) {
-        console.error("[Reports] Erro ao buscar estatísticas mensais:", err);
+    } catch (error) {
+        console.error("[Reports] Erro ao buscar resumo:", error);
         return { data: null, error: "Erro interno ao buscar dados" };
     }
+}
+
+export async function getMonthlyStats(
+    year: number,
+    month: number
+): Promise<{ data: MonthlyStats | null; error?: string }> {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    return getSummaryStats(startDate, endDate);
 }

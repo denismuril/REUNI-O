@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth";
 
 export interface AdminDeletionResult {
     success: boolean;
@@ -28,99 +29,115 @@ export interface DeletionLog {
     deleted_at: string;
 }
 
-/**
- * Busca todas as reservas futuras para o painel admin
- */
 export async function getBookingsForAdmin(): Promise<BookingForAdmin[]> {
+    await requireAdmin();
+
     const bookings = await prisma.booking.findMany({
-        where: {
-            // Remove future-only filter to show all bookings
-        },
         include: {
             room: true,
         },
         orderBy: { startTime: "desc" },
     });
 
-    return bookings.map((b) => ({
-        id: b.id,
-        title: b.title,
-        start_time: b.startTime.toISOString(),
-        end_time: b.endTime.toISOString(),
-        room_name: b.room.name,
-        creator_name: b.creatorName,
-        creator_email: b.creatorEmail,
-        status: b.status.toLowerCase(),
+    return bookings.map((booking) => ({
+        id: booking.id,
+        title: booking.title,
+        start_time: booking.startTime.toISOString(),
+        end_time: booking.endTime.toISOString(),
+        room_name: booking.room.name,
+        creator_name: booking.creatorName,
+        creator_email: booking.creatorEmail,
+        status: booking.status.toLowerCase(),
     }));
 }
 
-/**
- * Busca os logs de exclusão administrativa
- * Nota: A tabela admin_deletion_logs precisa ser criada se você quiser manter este recurso
- */
 export async function getDeletionLogs(): Promise<DeletionLog[]> {
-    // TODO: Implementar tabela AdminDeletionLog no schema se necessário
-    // Por enquanto retorna array vazio
+    await requireAdmin();
     return [];
 }
 
-/**
- * Exclui uma reserva diretamente (admin)
- */
 export async function adminDeleteBooking(
     bookingId: string,
-    deletedBy: string,
     reason?: string
 ): Promise<AdminDeletionResult> {
     try {
-        // Buscar dados da reserva
+        const actor = await requireAdmin();
+
         const booking = await prisma.booking.findUnique({
             where: { id: bookingId },
-            include: { room: true },
+            include: {
+                room: true,
+                childBookings: {
+                    select: { id: true },
+                },
+            },
         });
 
         if (!booking) {
-            return { success: false, message: "Reserva não encontrada." };
+            return { success: false, message: "Reserva nao encontrada." };
         }
 
-        // TODO: Se precisar de log de auditoria, criar tabela AdminDeletionLog
-        // Por enquanto apenas deleta
-        console.log(`[ADMIN DELETE] Reserva ${bookingId} deletada por ${deletedBy}. Motivo: ${reason || "N/A"}`);
+        if (booking.status === "CANCELLED") {
+            return { success: false, message: "Esta reserva ja foi cancelada." };
+        }
 
-        // Deletar a reserva
-        await prisma.booking.delete({
-            where: { id: bookingId },
+        const bookingIdsToCancel = booking.parentBookingId
+            ? [booking.id]
+            : [booking.id, ...booking.childBookings.map((child) => child.id)];
+
+        await prisma.booking.updateMany({
+            where: {
+                id: { in: bookingIdsToCancel },
+            },
+            data: {
+                status: "CANCELLED",
+            },
         });
 
-        return { success: true };
-    } catch (e) {
-        console.error("Admin delete error:", e);
-        return { success: false, message: "Erro inesperado ao excluir reserva." };
+        console.log(
+            `[ADMIN CANCEL] Reserva ${bookingId} cancelada por ${actor.email}. Motivo: ${reason || "N/A"}`
+        );
+
+        return {
+            success: true,
+            message: bookingIdsToCancel.length > 1
+                ? "Reserva e recorrencias canceladas com sucesso."
+                : "Reserva cancelada com sucesso.",
+        };
+    } catch (error) {
+        console.error("Admin cancel error:", error);
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : "Erro inesperado ao cancelar reserva.",
+        };
     }
 }
 
-/**
- * Cria uma nova filial
- */
 export async function createBranch(data: {
     name: string;
     location: string;
     address?: string;
     timezone?: string;
 }) {
+    await requireAdmin();
+
+    const name = data.name.trim();
+    const location = data.location.trim();
+
+    if (name.length < 2 || location.length < 2) {
+        throw new Error("Nome e localizacao da filial devem ter pelo menos 2 caracteres.");
+    }
+
     return prisma.branch.create({
         data: {
-            name: data.name,
-            location: data.location,
-            address: data.address,
+            name,
+            location,
+            address: data.address?.trim(),
             timezone: data.timezone || "America/Sao_Paulo",
         },
     });
 }
 
-/**
- * Atualiza uma filial
- */
 export async function updateBranch(id: string, data: {
     name?: string;
     location?: string;
@@ -128,15 +145,27 @@ export async function updateBranch(id: string, data: {
     timezone?: string;
     isActive?: boolean;
 }) {
+    await requireAdmin();
+
+    if (data.name && data.name.trim().length < 2) {
+        throw new Error("O nome da filial deve ter pelo menos 2 caracteres.");
+    }
+
+    if (data.location && data.location.trim().length < 2) {
+        throw new Error("A localizacao da filial deve ter pelo menos 2 caracteres.");
+    }
+
     return prisma.branch.update({
         where: { id },
-        data,
+        data: {
+            ...data,
+            name: data.name?.trim(),
+            location: data.location?.trim(),
+            address: data.address?.trim(),
+        },
     });
 }
 
-/**
- * Cria uma nova sala
- */
 export async function createRoom(data: {
     branchId: string;
     name: string;
@@ -145,21 +174,29 @@ export async function createRoom(data: {
     floor?: string;
     equipmentList?: string[];
 }) {
+    await requireAdmin();
+
+    const name = data.name.trim();
+    if (name.length < 2) {
+        throw new Error("O nome da sala deve ter pelo menos 2 caracteres.");
+    }
+
+    if (data.capacity < 1) {
+        throw new Error("A capacidade minima da sala e 1.");
+    }
+
     return prisma.room.create({
         data: {
             branchId: data.branchId,
-            name: data.name,
+            name,
             capacity: data.capacity,
-            description: data.description,
-            floor: data.floor,
+            description: data.description?.trim(),
+            floor: data.floor?.trim(),
             equipmentList: data.equipmentList || [],
         },
     });
 }
 
-/**
- * Atualiza uma sala
- */
 export async function updateRoom(id: string, data: {
     name?: string;
     capacity?: number;
@@ -168,8 +205,23 @@ export async function updateRoom(id: string, data: {
     equipmentList?: string[];
     isActive?: boolean;
 }) {
+    await requireAdmin();
+
+    if (data.name && data.name.trim().length < 2) {
+        throw new Error("O nome da sala deve ter pelo menos 2 caracteres.");
+    }
+
+    if (typeof data.capacity === "number" && data.capacity < 1) {
+        throw new Error("A capacidade minima da sala e 1.");
+    }
+
     return prisma.room.update({
         where: { id },
-        data,
+        data: {
+            ...data,
+            name: data.name?.trim(),
+            description: data.description?.trim(),
+            floor: data.floor?.trim(),
+        },
     });
 }

@@ -1,11 +1,8 @@
 "use server";
 
-import { prisma } from "@/lib/prisma/client";
 import bcrypt from "bcryptjs";
-
-// ============================================================
-// Types
-// ============================================================
+import { prisma } from "@/lib/prisma/client";
+import { requireAdmin, requireSuperAdmin } from "@/lib/auth";
 
 export interface AdminUser {
     id: string;
@@ -29,14 +26,9 @@ export interface UpdateAdminUserData {
     role?: "ADMIN" | "SUPERADMIN";
 }
 
-// ============================================================
-// Server Actions
-// ============================================================
-
-/**
- * Lista todos os usuários com role ADMIN ou SUPERADMIN
- */
 export async function getAdminUsers(): Promise<AdminUser[]> {
+    await requireAdmin();
+
     const users = await prisma.user.findMany({
         where: {
             role: { in: ["ADMIN", "SUPERADMIN"] },
@@ -60,30 +52,37 @@ export async function getAdminUsers(): Promise<AdminUser[]> {
     }));
 }
 
-/**
- * Cria um novo usuário admin
- */
 export async function createAdminUser(
     data: CreateAdminUserData
 ): Promise<{ success: boolean; message: string; user?: AdminUser }> {
     try {
-        // Verificar se email já existe
+        await requireSuperAdmin();
+
+        const normalizedEmail = data.email.toLowerCase().trim();
+        const fullName = data.fullName.trim();
+
+        if (fullName.length < 2) {
+            return { success: false, message: "Nome deve ter pelo menos 2 caracteres" };
+        }
+
+        if (data.password.length < 6) {
+            return { success: false, message: "Senha deve ter pelo menos 6 caracteres" };
+        }
+
         const existing = await prisma.user.findUnique({
-            where: { email: data.email },
+            where: { email: normalizedEmail },
         });
 
         if (existing) {
-            return { success: false, message: "Email já cadastrado" };
+            return { success: false, message: "Email ja cadastrado" };
         }
 
-        // Hash da senha
         const hashedPassword = await bcrypt.hash(data.password, 12);
 
-        // Criar usuário
         const user = await prisma.user.create({
             data: {
-                email: data.email,
-                fullName: data.fullName,
+                email: normalizedEmail,
+                fullName,
                 password: hashedPassword,
                 role: data.role,
             },
@@ -91,7 +90,7 @@ export async function createAdminUser(
 
         return {
             success: true,
-            message: "Usuário criado com sucesso",
+            message: "Usuario criado com sucesso",
             user: {
                 id: user.id,
                 email: user.email,
@@ -101,25 +100,36 @@ export async function createAdminUser(
             },
         };
     } catch (error) {
-        console.error("Erro ao criar usuário admin:", error);
-        return { success: false, message: "Erro ao criar usuário" };
+        console.error("Erro ao criar usuario admin:", error);
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : "Erro ao criar usuario",
+        };
     }
 }
 
-/**
- * Atualiza um usuário admin existente
- */
 export async function updateAdminUser(
     userId: string,
     data: UpdateAdminUserData
 ): Promise<{ success: boolean; message: string }> {
     try {
+        await requireSuperAdmin();
+
         const updateData: Record<string, unknown> = {};
 
-        if (data.email) updateData.email = data.email;
-        if (data.fullName) updateData.fullName = data.fullName;
+        if (data.email) updateData.email = data.email.toLowerCase().trim();
+        if (data.fullName) {
+            const fullName = data.fullName.trim();
+            if (fullName.length < 2) {
+                return { success: false, message: "Nome deve ter pelo menos 2 caracteres" };
+            }
+            updateData.fullName = fullName;
+        }
         if (data.role) updateData.role = data.role;
         if (data.password) {
+            if (data.password.length < 6) {
+                return { success: false, message: "Senha deve ter pelo menos 6 caracteres" };
+            }
             updateData.password = await bcrypt.hash(data.password, 12);
         }
 
@@ -128,21 +138,22 @@ export async function updateAdminUser(
             data: updateData,
         });
 
-        return { success: true, message: "Usuário atualizado com sucesso" };
+        return { success: true, message: "Usuario atualizado com sucesso" };
     } catch (error) {
-        console.error("Erro ao atualizar usuário admin:", error);
-        return { success: false, message: "Erro ao atualizar usuário" };
+        console.error("Erro ao atualizar usuario admin:", error);
+        return {
+            success: false,
+            message: error instanceof Error ? error.message : "Erro ao atualizar usuario",
+        };
     }
 }
 
-/**
- * Exclui um usuário admin
- */
 export async function deleteAdminUser(
     userId: string
 ): Promise<{ success: boolean; message: string }> {
     try {
-        // Verificar quantos admins existem
+        const actor = await requireSuperAdmin();
+
         const adminCount = await prisma.user.count({
             where: { role: { in: ["ADMIN", "SUPERADMIN"] } },
         });
@@ -150,7 +161,14 @@ export async function deleteAdminUser(
         if (adminCount <= 1) {
             return {
                 success: false,
-                message: "Não é possível excluir o único administrador",
+                message: "Nao e possivel excluir o unico administrador",
+            };
+        }
+
+        if (actor.id === userId) {
+            return {
+                success: false,
+                message: "Nao e possivel excluir a propria conta.",
             };
         }
 
@@ -158,62 +176,12 @@ export async function deleteAdminUser(
             where: { id: userId },
         });
 
-        return { success: true, message: "Usuário excluído com sucesso" };
+        return { success: true, message: "Usuario excluido com sucesso" };
     } catch (error) {
-        console.error("Erro ao excluir usuário admin:", error);
-        return { success: false, message: "Erro ao excluir usuário" };
-    }
-}
-
-/**
- * Verifica credenciais de admin (usado pela API de auth)
- */
-export async function verifyAdminCredentials(
-    email: string,
-    password: string
-): Promise<{ success: boolean; user?: AdminUser }> {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { email },
-        });
-
-        if (!user || !user.password) {
-            return { success: false };
-        }
-
-        // Verificar se é admin
-        if (!["ADMIN", "SUPERADMIN"].includes(user.role)) {
-            return { success: false };
-        }
-
-        // Verificar senha
-        const isValid = await bcrypt.compare(password, user.password);
-
-        if (!isValid) {
-            return { success: false };
-        }
-
+        console.error("Erro ao excluir usuario admin:", error);
         return {
-            success: true,
-            user: {
-                id: user.id,
-                email: user.email,
-                fullName: user.fullName,
-                role: user.role as "ADMIN" | "SUPERADMIN",
-                createdAt: user.createdAt.toISOString(),
-            },
+            success: false,
+            message: error instanceof Error ? error.message : "Erro ao excluir usuario",
         };
-    } catch (error) {
-        console.error("Erro ao verificar credenciais:", error);
-        return { success: false };
     }
-}
-
-/**
- * Conta quantos admins existem no banco
- */
-export async function countAdmins(): Promise<number> {
-    return prisma.user.count({
-        where: { role: { in: ["ADMIN", "SUPERADMIN"] } },
-    });
 }

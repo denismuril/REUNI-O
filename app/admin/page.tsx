@@ -1,997 +1,181 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Building2, DoorOpen, Plus, Lock, LogOut, Trash2, Pencil, Save, X, Calendar, Clock, Search, BarChart3, Users, UserPlus } from "lucide-react";
+import { signOut } from "next-auth/react";
+import { BarChart3, Building2, Calendar, DoorOpen, LogOut, Search, Trash2, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getBranches, getRoomsByBranch } from "@/app/actions/booking";
-import {
-    getBookingsForAdmin,
-    getDeletionLogs,
-    adminDeleteBooking,
-    createBranch,
-    updateBranch,
-    createRoom,
-    updateRoom,
-    BookingForAdmin,
-    DeletionLog,
-} from "@/app/actions/admin-actions";
-import {
-    getAdminUsers,
-    createAdminUser,
-    deleteAdminUser,
-    AdminUser,
-} from "@/app/actions/user-actions";
+import { adminDeleteBooking, createBranch, createRoom, getBookingsForAdmin, updateBranch, updateRoom } from "@/app/actions/admin-actions";
+import { createAdminUser, deleteAdminUser, getAdminUsers } from "@/app/actions/user-actions";
 
-// Tipos locais
-type Branch = {
-    id: string;
-    name: string;
-    location: string;
-    isActive: boolean;
-};
-
-type Room = {
-    id: string;
-    name: string;
-    capacity: number;
-    branchId: string;
-    isActive: boolean;
-};
-
-// Schemas
-const branchSchema = z.object({
-    name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
-    location: z.string().min(2, "Local deve ter pelo menos 2 caracteres"),
-});
-
-const roomSchema = z.object({
-    name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
-    branchId: z.string().min(1, "Selecione uma filial"),
-    capacity: z.coerce.number().min(1, "Capacidade mínima é 1"),
-});
-
-const userSchema = z.object({
-    email: z.string().email("Email inválido"),
-    fullName: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
-    password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres"),
-    role: z.enum(["ADMIN", "SUPERADMIN"]),
-});
-
-type BranchFormData = z.infer<typeof branchSchema>;
-type RoomFormData = z.infer<typeof roomSchema>;
-type UserFormData = z.infer<typeof userSchema>;
+type Branch = { id: string; name: string; location: string; isActive: boolean };
+type Room = { id: string; name: string; capacity: number; branchId: string; isActive: boolean };
+type Booking = { id: string; title: string; start_time: string; end_time: string; room_name: string; creator_name: string | null; creator_email: string | null; status: string };
+type AdminUser = { id: string; email: string; fullName: string; role: "ADMIN" | "SUPERADMIN"; createdAt: string };
 
 export default function AdminPage() {
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const [username, setUsername] = useState("");
-    const [password, setPassword] = useState("");
-    const [loginError, setLoginError] = useState("");
-
-    // Dados
     const [branches, setBranches] = useState<Branch[]>([]);
     const [rooms, setRooms] = useState<Room[]>([]);
-
-    // Estados de edição
-    const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
-    const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
-
-    // Feedback
-    const [branchSuccess, setBranchSuccess] = useState("");
-    const [roomSuccess, setRoomSuccess] = useState("");
-    const [branchError, setBranchError] = useState("");
-    const [roomError, setRoomError] = useState("");
-
-    // Reuniões Admin
-    const [bookings, setBookings] = useState<BookingForAdmin[]>([]);
-    const [deletingBookingId, setDeletingBookingId] = useState<string | null>(null);
+    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [admins, setAdmins] = useState<AdminUser[]>([]);
+    const [branchName, setBranchName] = useState("");
+    const [branchLocation, setBranchLocation] = useState("");
+    const [roomName, setRoomName] = useState("");
+    const [roomBranchId, setRoomBranchId] = useState("");
+    const [roomCapacity, setRoomCapacity] = useState("10");
+    const [userEmail, setUserEmail] = useState("");
+    const [userFullName, setUserFullName] = useState("");
+    const [userPassword, setUserPassword] = useState("");
+    const [userRole, setUserRole] = useState<"ADMIN" | "SUPERADMIN">("ADMIN");
+    const [search, setSearch] = useState("");
+    const [dateFilter, setDateFilter] = useState("");
+    const [deletingId, setDeletingId] = useState<string | null>(null);
     const [deletionReason, setDeletionReason] = useState("");
-    const [bookingError, setBookingError] = useState("");
-    const [bookingSuccess, setBookingSuccess] = useState("");
-    const [bookingSearch, setBookingSearch] = useState("");
-    const [bookingDateFilter, setBookingDateFilter] = useState("");
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
 
-    // Usuários Admin
-    const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
-    const [userSuccess, setUserSuccess] = useState("");
-    const [userError, setUserError] = useState("");
-    const [showUserForm, setShowUserForm] = useState(false);
-
-    // Filtrar reuniões por pesquisa e data
-    const filteredBookings = bookings.filter((b) => {
-        const matchesSearch =
-            b.title.toLowerCase().includes(bookingSearch.toLowerCase()) ||
-            b.room_name.toLowerCase().includes(bookingSearch.toLowerCase()) ||
-            (b.creator_name && b.creator_name.toLowerCase().includes(bookingSearch.toLowerCase())) ||
-            (b.creator_email && b.creator_email.toLowerCase().includes(bookingSearch.toLowerCase()));
-
-        const matchesDate = !bookingDateFilter ||
-            new Date(b.start_time).toISOString().split('T')[0] === bookingDateFilter;
-
-        return matchesSearch && matchesDate;
-    });
-
-    const branchForm = useForm<BranchFormData>({
-        resolver: zodResolver(branchSchema),
-        defaultValues: { name: "", location: "" },
-    });
-
-    const roomForm = useForm<RoomFormData>({
-        resolver: zodResolver(roomSchema),
-        defaultValues: { name: "", branchId: "", capacity: 10 },
-    });
-
-    const userForm = useForm<UserFormData>({
-        resolver: zodResolver(userSchema),
-        defaultValues: { email: "", fullName: "", password: "", role: "ADMIN" },
-    });
-
-    // Carrega dados
-    useEffect(() => {
-        if (!isAuthenticated) return;
-        loadData();
-    }, [isAuthenticated]);
+    useEffect(() => { loadData(); }, []);
 
     async function loadData() {
-        // Carregar branches via server action
-        const branchesData = await getBranches();
-        setBranches(branchesData as Branch[]);
-
-        // Carregar todas as rooms (precisamos buscar de cada branch)
-        const allRooms: Room[] = [];
-        for (const branch of branchesData) {
-            const roomsData = await getRoomsByBranch(branch.id);
-            allRooms.push(...(roomsData as Room[]));
+        try {
+            const branchData = await getBranches();
+            const roomData = await Promise.all(branchData.map((branch) => getRoomsByBranch(branch.id)));
+            const [bookingData, adminData] = await Promise.all([getBookingsForAdmin(), getAdminUsers()]);
+            setBranches(branchData as Branch[]);
+            setRooms(roomData.flat() as Room[]);
+            setBookings(bookingData as Booking[]);
+            setAdmins(adminData as AdminUser[]);
+        } catch (err) {
+            console.error(err);
+            setError("Nao foi possivel carregar o painel.");
         }
-        setRooms(allRooms);
-
-        // Carrega reuniões
-        const bookingsData = await getBookingsForAdmin();
-        setBookings(bookingsData);
-
-        // Carrega usuários admin
-        const usersData = await getAdminUsers();
-        setAdminUsers(usersData);
     }
 
-    // Exclusão de reunião (admin)
-    const handleDeleteBooking = async (bookingId: string) => {
-        setBookingError("");
-        setBookingSuccess("");
+    const filteredBookings = bookings.filter((booking) => {
+        const matchText = [booking.title, booking.room_name, booking.creator_name || "", booking.creator_email || ""]
+            .join(" ")
+            .toLowerCase()
+            .includes(search.toLowerCase());
+        const matchDate = !dateFilter || new Date(booking.start_time).toISOString().split("T")[0] === dateFilter;
+        return matchText && matchDate;
+    });
 
-        const result = await adminDeleteBooking(bookingId, "admin", deletionReason || undefined);
-
-        if (result.success) {
-            setBookingSuccess("Reunião excluída com sucesso!");
-            setDeletingBookingId(null);
-            setDeletionReason("");
-            loadData();
+    const flash = (message: string, isError = false) => {
+        if (isError) {
+            setError(message);
+            setSuccess("");
         } else {
-            setBookingError(result.message || "Erro ao excluir reunião.");
+            setSuccess(message);
+            setError("");
         }
     };
 
-    // Login
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoginError("");
-
-        try {
-            const response = await fetch("/api/admin/auth", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password }),
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                setIsAuthenticated(true);
-            } else {
-                setLoginError(data.message || "Usuário ou senha incorretos");
-            }
-        } catch (error) {
-            setLoginError("Erro ao conectar com o servidor");
-        }
-    };
-
-    // Logout
-    const handleLogout = () => {
-        setIsAuthenticated(false);
-        setUsername("");
-        setPassword("");
-    };
-
-    // --- BRANCHES ---
-
-    const startEditBranch = (branch: Branch) => {
-        setEditingBranchId(branch.id);
-        branchForm.setValue("name", branch.name);
-        branchForm.setValue("location", branch.location);
-        setBranchError("");
-        setBranchSuccess("");
-    };
-
-    const cancelEditBranch = () => {
-        setEditingBranchId(null);
-        branchForm.reset();
-        setBranchError("");
-        setBranchSuccess("");
-    };
-
-    const onSubmitBranch = async (data: BranchFormData) => {
-        setBranchError("");
-        setBranchSuccess("");
-
-        try {
-            if (editingBranchId) {
-                await updateBranch(editingBranchId, {
-                    name: data.name,
-                    location: data.location
-                });
-                setBranchSuccess(`Filial "${data.name}" atualizada com sucesso!`);
-                setEditingBranchId(null);
-            } else {
-                await createBranch({
-                    name: data.name,
-                    location: data.location,
-                });
-                setBranchSuccess(`Filial "${data.name}" criada com sucesso!`);
-            }
-
-            branchForm.reset();
-            loadData();
-        } catch (error: any) {
-            setBranchError(error.message || "Erro ao salvar filial");
-        }
-    };
-
-    const deleteBranch = async (id: string, name: string) => {
-        if (!confirm(`Tem certeza que deseja excluir a filial "${name}"?`)) return;
-
-        try {
-            await updateBranch(id, { isActive: false });
-            setBranchSuccess(`Filial "${name}" desativada com sucesso!`);
-            loadData();
-        } catch (error: any) {
-            setBranchError("Erro ao excluir. Verifique se existem salas vinculadas.");
-        }
-    };
-
-    // --- ROOMS ---
-
-    const startEditRoom = (room: Room) => {
-        setEditingRoomId(room.id);
-        roomForm.setValue("name", room.name);
-        roomForm.setValue("branchId", room.branchId);
-        roomForm.setValue("capacity", room.capacity);
-        setRoomError("");
-        setRoomSuccess("");
-    };
-
-    const cancelEditRoom = () => {
-        setEditingRoomId(null);
-        roomForm.reset();
-        setRoomError("");
-        setRoomSuccess("");
-    };
-
-    const onSubmitRoom = async (data: RoomFormData) => {
-        setRoomError("");
-        setRoomSuccess("");
-
-        try {
-            if (editingRoomId) {
-                await updateRoom(editingRoomId, {
-                    name: data.name,
-                    capacity: data.capacity,
-                });
-                setRoomSuccess(`Sala "${data.name}" atualizada com sucesso!`);
-                setEditingRoomId(null);
-            } else {
-                await createRoom({
-                    branchId: data.branchId,
-                    name: data.name,
-                    capacity: data.capacity,
-                });
-                setRoomSuccess(`Sala "${data.name}" criada com sucesso!`);
-            }
-
-            roomForm.reset();
-            loadData();
-        } catch (error: any) {
-            setRoomError(error.message || "Erro ao salvar sala");
-        }
-    };
-
-    const deleteRoom = async (id: string, name: string) => {
-        if (!confirm(`Tem certeza que deseja excluir a sala "${name}"?`)) return;
-
-        try {
-            await updateRoom(id, { isActive: false });
-            setRoomSuccess(`Sala "${name}" desativada com sucesso!`);
-            loadData();
-        } catch (error: any) {
-            setRoomError("Erro ao excluir sala.");
-        }
-    };
-
-
-    // Tela de login
-    if (!isAuthenticated) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-                <Card className="w-full max-w-md">
-                    <CardHeader className="text-center">
-                        <div className="mx-auto bg-gradient-to-br from-blue-600 to-indigo-600 p-3 rounded-xl w-fit mb-4">
-                            <Lock className="h-8 w-8 text-white" />
-                        </div>
-                        <CardTitle className="text-2xl">Painel Administrativo</CardTitle>
-                        <CardDescription>
-                            Entre com suas credenciais para acessar
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={handleLogin} className="space-y-4">
-                            {loginError && (
-                                <div className="p-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm">
-                                    {loginError}
-                                </div>
-                            )}
-                            <div className="space-y-2">
-                                <Label htmlFor="username">Usuário</Label>
-                                <Input
-                                    id="username"
-                                    value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
-                                    placeholder="Digite o usuário"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="password">Senha</Label>
-                                <Input
-                                    id="password"
-                                    type="password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    placeholder="Digite a senha"
-                                />
-                            </div>
-                            <Button type="submit" className="w-full">
-                                Entrar
-                            </Button>
-                        </form>
-                    </CardContent>
-                </Card>
-            </div>
-        );
-    }
-
-    // Painel admin
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-            {/* Header */}
-            <header className="bg-white/80 backdrop-blur-sm border-b sticky top-0 z-50">
-                <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-2 rounded-lg">
-                            <Lock className="h-5 w-5 text-white" />
-                        </div>
-                        <div>
-                            <h1 className="text-lg font-bold">Painel Admin</h1>
-                            <p className="text-xs text-muted-foreground">REUNI-O</p>
-                        </div>
+            <header className="border-b bg-white/80 backdrop-blur">
+                <div className="container mx-auto flex items-center justify-between px-4 py-3">
+                    <div>
+                        <h1 className="text-lg font-bold">Painel Admin</h1>
+                        <p className="text-xs text-muted-foreground">REUNI-O</p>
                     </div>
-                    <div className="flex items-center gap-4">
-                        <Link href="/admin/reports">
-                            <Button variant="outline" className="gap-2">
-                                <BarChart3 className="h-4 w-4" />
-                                Relatórios
-                            </Button>
-                        </Link>
-                        <Button variant="ghost" onClick={handleLogout} className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50">
-                            <LogOut className="h-4 w-4" />
-                            Sair
-                        </Button>
+                    <div className="flex items-center gap-3">
+                        <Link href="/admin/reports"><Button variant="outline"><BarChart3 className="mr-2 h-4 w-4" />Relatorios</Button></Link>
+                        <Button variant="ghost" onClick={() => signOut({ callbackUrl: "/login" })}><LogOut className="mr-2 h-4 w-4" />Sair</Button>
                     </div>
                 </div>
             </header>
 
-            <main className="container mx-auto px-4 py-8">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <main className="container mx-auto space-y-8 px-4 py-8">
+                {(error || success) && <div className={`rounded-md border p-3 text-sm ${error ? "border-red-200 bg-red-100 text-red-700" : "border-green-200 bg-green-100 text-green-700"}`}>{error || success}</div>}
 
-                    {/* --- GERENCIAR FILIAIS --- */}
+                <div className="grid gap-8 lg:grid-cols-2">
                     <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <Building2 className="h-5 w-5" />
-                                {editingBranchId ? "Editar Filial" : "Adicionar Filial"}
-                            </CardTitle>
-                            <CardDescription>
-                                {editingBranchId ? "Atualize os dados da filial" : "Crie uma nova filial para o sistema"}
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <form onSubmit={branchForm.handleSubmit(onSubmitBranch)} className="space-y-4">
-                                {branchError && (
-                                    <div className="p-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm">
-                                        {branchError}
-                                    </div>
-                                )}
-                                {branchSuccess && (
-                                    <div className="p-3 bg-green-100 border border-green-200 rounded-md text-green-600 text-sm">
-                                        {branchSuccess}
-                                    </div>
-                                )}
-                                <div className="space-y-2">
-                                    <Label htmlFor="branchName">Nome da Filial</Label>
-                                    <Input
-                                        id="branchName"
-                                        {...branchForm.register("name")}
-                                        placeholder="Ex: Sede Lisboa"
-                                    />
-                                    {branchForm.formState.errors.name && (
-                                        <p className="text-xs text-red-500">
-                                            {branchForm.formState.errors.name.message}
-                                        </p>
-                                    )}
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="branchLocation">Localização</Label>
-                                    <Input
-                                        id="branchLocation"
-                                        {...branchForm.register("location")}
-                                        placeholder="Ex: Av. da Liberdade, 100"
-                                    />
-                                    {branchForm.formState.errors.location && (
-                                        <p className="text-xs text-red-500">
-                                            {branchForm.formState.errors.location.message}
-                                        </p>
-                                    )}
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button type="submit" className="flex-1">
-                                        {editingBranchId ? (
-                                            <>
-                                                <Save className="h-4 w-4 mr-2" />
-                                                Salvar Alterações
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Plus className="h-4 w-4 mr-2" />
-                                                Adicionar Filial
-                                            </>
-                                        )}
-                                    </Button>
-                                    {editingBranchId && (
-                                        <Button type="button" variant="outline" onClick={cancelEditBranch}>
-                                            <X className="h-4 w-4 mr-2" />
-                                            Cancelar
-                                        </Button>
-                                    )}
-                                </div>
-                            </form>
-
-                            {/* Lista de filiais */}
-                            <div className="mt-6">
-                                <h4 className="font-medium mb-3">Filiais Cadastradas</h4>
-                                <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                                    {branches.map((branch) => (
-                                        <div
-                                            key={branch.id}
-                                            className={`flex items-center justify-between p-3 rounded-lg border ${editingBranchId === branch.id ? 'bg-blue-50 border-blue-200 border-l-4 border-l-blue-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}
-                                        >
-                                            <div className="flex-1">
-                                                <p className="font-medium">{branch.name}</p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {branch.location}
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                    onClick={() => startEditBranch(branch)}
-                                                >
-                                                    <Pencil className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                    onClick={() => deleteBranch(branch.id, branch.name)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {branches.length === 0 && (
-                                        <p className="text-sm text-muted-foreground text-center py-4">
-                                            Nenhuma filial cadastrada
-                                        </p>
-                                    )}
-                                </div>
+                        <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" />Filiais</CardTitle><CardDescription>Criar, editar e desativar filiais.</CardDescription></CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="space-y-2"><Label>Nome</Label><Input value={branchName} onChange={(e) => setBranchName(e.target.value)} /></div>
+                            <div className="space-y-2"><Label>Localizacao</Label><Input value={branchLocation} onChange={(e) => setBranchLocation(e.target.value)} /></div>
+                            <Button onClick={async () => {
+                                try {
+                                    await createBranch({ name: branchName, location: branchLocation });
+                                    setBranchName(""); setBranchLocation(""); flash("Filial criada com sucesso."); await loadData();
+                                } catch { flash("Nao foi possivel criar a filial.", true); }
+                            }}>Criar Filial</Button>
+                            <div className="space-y-2">
+                                {branches.map((branch) => <div key={branch.id} className="flex items-center justify-between rounded border bg-white p-3"><div><p className="font-medium">{branch.name}</p><p className="text-xs text-muted-foreground">{branch.location}</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={async () => {
+                                    const name = prompt("Nome da filial", branch.name); if (!name) return;
+                                    const location = prompt("Localizacao", branch.location); if (!location) return;
+                                    try { await updateBranch(branch.id, { name, location }); flash("Filial atualizada."); await loadData(); } catch { flash("Nao foi possivel atualizar a filial.", true); }
+                                }}>Editar</Button><Button variant="ghost" size="icon" className="text-red-600" onClick={async () => {
+                                    if (!confirm(`Desativar ${branch.name}?`)) return;
+                                    try { await updateBranch(branch.id, { isActive: false }); flash("Filial desativada."); await loadData(); } catch { flash("Nao foi possivel desativar a filial.", true); }
+                                }}><Trash2 className="h-4 w-4" /></Button></div></div>)}
                             </div>
                         </CardContent>
                     </Card>
 
-                    {/* --- GERENCIAR SALAS --- */}
                     <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <DoorOpen className="h-5 w-5" />
-                                {editingRoomId ? "Editar Sala" : "Adicionar Sala"}
-                            </CardTitle>
-                            <CardDescription>
-                                {editingRoomId ? "Atualize os dados da sala" : "Crie uma nova sala de reunião"}
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <form onSubmit={roomForm.handleSubmit(onSubmitRoom)} className="space-y-4">
-                                {roomError && (
-                                    <div className="p-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm">
-                                        {roomError}
-                                    </div>
-                                )}
-                                {roomSuccess && (
-                                    <div className="p-3 bg-green-100 border border-green-200 rounded-md text-green-600 text-sm">
-                                        {roomSuccess}
-                                    </div>
-                                )}
-                                <div className="space-y-2">
-                                    <Label>Filial</Label>
-                                    <Select
-                                        value={roomForm.watch("branchId")}
-                                        onValueChange={(value) => roomForm.setValue("branchId", value)}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Selecione a filial" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {branches.map((branch) => (
-                                                <SelectItem key={branch.id} value={branch.id}>
-                                                    {branch.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    {roomForm.formState.errors.branchId && (
-                                        <p className="text-xs text-red-500">
-                                            {roomForm.formState.errors.branchId.message}
-                                        </p>
-                                    )}
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="roomName">Nome da Sala</Label>
-                                    <Input
-                                        id="roomName"
-                                        {...roomForm.register("name")}
-                                        placeholder="Ex: Sala Tejo"
-                                    />
-                                    {roomForm.formState.errors.name && (
-                                        <p className="text-xs text-red-500">
-                                            {roomForm.formState.errors.name.message}
-                                        </p>
-                                    )}
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="roomCapacity">Capacidade</Label>
-                                    <Input
-                                        id="roomCapacity"
-                                        type="number"
-                                        {...roomForm.register("capacity")}
-                                        placeholder="10"
-                                    />
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button type="submit" className="flex-1">
-                                        {editingRoomId ? (
-                                            <>
-                                                <Save className="h-4 w-4 mr-2" />
-                                                Salvar Alterações
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Plus className="h-4 w-4 mr-2" />
-                                                Adicionar Sala
-                                            </>
-                                        )}
-                                    </Button>
-                                    {editingRoomId && (
-                                        <Button type="button" variant="outline" onClick={cancelEditRoom}>
-                                            <X className="h-4 w-4 mr-2" />
-                                            Cancelar
-                                        </Button>
-                                    )}
-                                </div>
-                            </form>
-
-                            {/* Lista de salas */}
-                            <div className="mt-6">
-                                <h4 className="font-medium mb-3">Salas Cadastradas</h4>
-                                <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                                    {rooms.map((room) => (
-                                        <div
-                                            key={room.id}
-                                            className={`flex items-center justify-between p-3 rounded-lg border ${editingRoomId === room.id ? 'bg-blue-50 border-blue-200 border-l-4 border-l-blue-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}
-                                        >
-                                            <div>
-                                                <p className="font-medium">{room.name}</p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {room.capacity} pessoas
-                                                </p>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                    onClick={() => startEditRoom(room)}
-                                                >
-                                                    <Pencil className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                    onClick={() => deleteRoom(room.id, room.name)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {rooms.length === 0 && (
-                                        <p className="text-sm text-muted-foreground text-center py-4">
-                                            Nenhuma sala cadastrada
-                                        </p>
-                                    )}
-                                </div>
+                        <CardHeader><CardTitle className="flex items-center gap-2"><DoorOpen className="h-5 w-5" />Salas</CardTitle><CardDescription>Criar, editar e desativar salas.</CardDescription></CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="space-y-2"><Label>Nome</Label><Input value={roomName} onChange={(e) => setRoomName(e.target.value)} /></div>
+                            <div className="space-y-2"><Label>Filial</Label><Select value={roomBranchId} onValueChange={setRoomBranchId}><SelectTrigger><SelectValue placeholder="Selecione a filial" /></SelectTrigger><SelectContent>{branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent></Select></div>
+                            <div className="space-y-2"><Label>Capacidade</Label><Input type="number" min={1} value={roomCapacity} onChange={(e) => setRoomCapacity(e.target.value)} /></div>
+                            <Button onClick={async () => {
+                                try {
+                                    await createRoom({ name: roomName, branchId: roomBranchId, capacity: Number(roomCapacity) });
+                                    setRoomName(""); setRoomBranchId(""); setRoomCapacity("10"); flash("Sala criada com sucesso."); await loadData();
+                                } catch { flash("Nao foi possivel criar a sala.", true); }
+                            }}>Criar Sala</Button>
+                            <div className="space-y-2">
+                                {rooms.map((room) => <div key={room.id} className="flex items-center justify-between rounded border bg-white p-3"><div><p className="font-medium">{room.name}</p><p className="text-xs text-muted-foreground">{branches.find((branch) => branch.id === room.branchId)?.name || "Filial"} • {room.capacity} lugares</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={async () => {
+                                    const name = prompt("Nome da sala", room.name); if (!name) return;
+                                    const capacity = prompt("Capacidade", String(room.capacity)); if (!capacity) return;
+                                    try { await updateRoom(room.id, { name, capacity: Number(capacity) }); flash("Sala atualizada."); await loadData(); } catch { flash("Nao foi possivel atualizar a sala.", true); }
+                                }}>Editar</Button><Button variant="ghost" size="icon" className="text-red-600" onClick={async () => {
+                                    if (!confirm(`Desativar ${room.name}?`)) return;
+                                    try { await updateRoom(room.id, { isActive: false }); flash("Sala desativada."); await loadData(); } catch { flash("Nao foi possivel desativar a sala.", true); }
+                                }}><Trash2 className="h-4 w-4" /></Button></div></div>)}
                             </div>
                         </CardContent>
                     </Card>
                 </div>
 
-                {/* --- GERENCIAR REUNIÕES --- */}
-                <Card className="mt-8">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <Calendar className="h-5 w-5" />
-                            Gerenciar Reuniões
-                        </CardTitle>
-                        <CardDescription>
-                            Visualize e exclua reuniões agendadas
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {bookingError && (
-                            <div className="p-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm mb-4">
-                                {bookingError}
-                            </div>
-                        )}
-                        {bookingSuccess && (
-                            <div className="p-3 bg-green-100 border border-green-200 rounded-md text-green-600 text-sm mb-4">
-                                {bookingSuccess}
-                            </div>
-                        )}
-
-                        {/* Filtros de Pesquisa */}
-                        <div className="flex gap-4 mb-4">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Pesquisar por título, sala, responsável..."
-                                    value={bookingSearch}
-                                    onChange={(e) => setBookingSearch(e.target.value)}
-                                    className="pl-10"
-                                />
-                            </div>
-                            <div className="w-48">
-                                <Input
-                                    type="date"
-                                    value={bookingDateFilter}
-                                    onChange={(e) => setBookingDateFilter(e.target.value)}
-                                    placeholder="Filtrar por data"
-                                />
-                            </div>
-                            {bookingDateFilter && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setBookingDateFilter("")}
-                                    className="h-10"
-                                >
-                                    <X className="h-4 w-4" />
-                                </Button>
-                            )}
-                            <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => loadData()}
-                                className="h-10"
-                            >
-                                <Search className="h-4 w-4 mr-2" />
-                                Pesquisar
-                            </Button>
-                        </div>
-
-                        <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                            {filteredBookings.map((booking) => (
-                                <div
-                                    key={booking.id}
-                                    className={`flex items-center justify-between p-3 rounded-lg border ${deletingBookingId === booking.id ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100 hover:border-slate-300'}`}
-                                >
-                                    <div className="flex-1">
-                                        <p className="font-medium">{booking.title}</p>
-                                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                            <span className="flex items-center gap-1">
-                                                <Clock className="h-3 w-3" />
-                                                {new Date(booking.start_time).toLocaleDateString("pt-BR")} {new Date(booking.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                                            </span>
-                                            <span>{booking.room_name}</span>
-                                            {booking.creator_name && <span>Por: {booking.creator_name}</span>}
-                                        </div>
-                                    </div>
-
-                                    {deletingBookingId === booking.id ? (
-                                        <div className="flex items-center gap-2">
-                                            <Input
-                                                placeholder="Motivo (opcional)"
-                                                value={deletionReason}
-                                                onChange={(e) => setDeletionReason(e.target.value)}
-                                                className="w-48 h-8 text-sm"
-                                            />
-                                            <Button
-                                                size="sm"
-                                                variant="destructive"
-                                                onClick={() => handleDeleteBooking(booking.id)}
-                                            >
-                                                Confirmar
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={() => {
-                                                    setDeletingBookingId(null);
-                                                    setDeletionReason("");
-                                                }}
-                                            >
-                                                Cancelar
-                                            </Button>
-                                        </div>
-                                    ) : (
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                            onClick={() => setDeletingBookingId(booking.id)}
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    )}
-                                </div>
-                            ))}
-                            {bookings.length === 0 && (
-                                <p className="text-sm text-muted-foreground text-center py-4">
-                                    Nenhuma reunião futura agendada
-                                </p>
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* --- GERENCIAR USUÁRIOS ADMIN --- */}
                 <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <Users className="h-5 w-5" />
-                            Gerenciar Usuários Admin
-                        </CardTitle>
-                        <CardDescription>
-                            Adicione ou remova administradores do sistema
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {userError && (
-                            <div className="p-3 bg-red-100 border border-red-200 rounded-md text-red-600 text-sm mb-4">
-                                {userError}
-                            </div>
-                        )}
-                        {userSuccess && (
-                            <div className="p-3 bg-green-100 border border-green-200 rounded-md text-green-600 text-sm mb-4">
-                                {userSuccess}
-                            </div>
-                        )}
-
-                        {/* Botão Adicionar */}
-                        {!showUserForm && (
-                            <Button
-                                variant="outline"
-                                className="mb-4"
-                                onClick={() => setShowUserForm(true)}
-                            >
-                                <UserPlus className="h-4 w-4 mr-2" />
-                                Adicionar Admin
-                            </Button>
-                        )}
-
-                        {/* Formulário de criação */}
-                        {showUserForm && (
-                            <form
-                                onSubmit={userForm.handleSubmit(async (data) => {
-                                    setUserError("");
-                                    setUserSuccess("");
-                                    const result = await createAdminUser(data);
-                                    if (result.success) {
-                                        setUserSuccess(result.message);
-                                        userForm.reset();
-                                        setShowUserForm(false);
-                                        loadData();
-                                    } else {
-                                        setUserError(result.message);
-                                    }
-                                })}
-                                className="space-y-4 mb-6 p-4 border rounded-lg bg-slate-50"
-                            >
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="userEmail">Email</Label>
-                                        <Input
-                                            id="userEmail"
-                                            type="email"
-                                            {...userForm.register("email")}
-                                            placeholder="admin@empresa.com"
-                                        />
-                                        {userForm.formState.errors.email && (
-                                            <p className="text-xs text-red-500">
-                                                {userForm.formState.errors.email.message}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="userFullName">Nome Completo</Label>
-                                        <Input
-                                            id="userFullName"
-                                            {...userForm.register("fullName")}
-                                            placeholder="Nome do Admin"
-                                        />
-                                        {userForm.formState.errors.fullName && (
-                                            <p className="text-xs text-red-500">
-                                                {userForm.formState.errors.fullName.message}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="userPassword">Senha</Label>
-                                        <Input
-                                            id="userPassword"
-                                            type="password"
-                                            {...userForm.register("password")}
-                                            placeholder="******"
-                                        />
-                                        {userForm.formState.errors.password && (
-                                            <p className="text-xs text-red-500">
-                                                {userForm.formState.errors.password.message}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Nível de Acesso</Label>
-                                        <Select
-                                            value={userForm.watch("role")}
-                                            onValueChange={(v) => userForm.setValue("role", v as "ADMIN" | "SUPERADMIN")}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="ADMIN">Admin</SelectItem>
-                                                <SelectItem value="SUPERADMIN">Super Admin</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button type="submit">
-                                        <UserPlus className="h-4 w-4 mr-2" />
-                                        Criar Admin
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => {
-                                            setShowUserForm(false);
-                                            userForm.reset();
-                                        }}
-                                    >
-                                        Cancelar
-                                    </Button>
-                                </div>
-                            </form>
-                        )}
-
-                        {/* Lista de admins */}
+                    <CardHeader><CardTitle className="flex items-center gap-2"><Calendar className="h-5 w-5" />Reservas</CardTitle><CardDescription>Pesquisar e cancelar reservas sem apagar historico.</CardDescription></CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex flex-col gap-3 md:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-10" placeholder="Pesquisar..." value={search} onChange={(e) => setSearch(e.target.value)} /></div><Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="md:w-48" /></div>
                         <div className="space-y-2">
-                            {adminUsers.map((user) => (
-                                <div
-                                    key={user.id}
-                                    className="flex items-center justify-between p-3 rounded-lg border bg-white hover:border-slate-300"
-                                >
-                                    <div className="flex-1">
-                                        <p className="font-medium">{user.fullName}</p>
-                                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                            <span>{user.email}</span>
-                                            <span className={`px-2 py-0.5 rounded-full text-xs ${user.role === "SUPERADMIN"
-                                                    ? "bg-purple-100 text-purple-700"
-                                                    : "bg-blue-100 text-blue-700"
-                                                }`}>
-                                                {user.role === "SUPERADMIN" ? "Super Admin" : "Admin"}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                                        onClick={async () => {
-                                            if (!confirm("Tem certeza que deseja excluir este admin?")) return;
-                                            setUserError("");
-                                            const result = await deleteAdminUser(user.id);
-                                            if (result.success) {
-                                                setUserSuccess(result.message);
-                                                loadData();
-                                            } else {
-                                                setUserError(result.message);
-                                            }
-                                        }}
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            ))}
-                            {adminUsers.length === 0 && (
-                                <p className="text-sm text-muted-foreground text-center py-4">
-                                    Nenhum administrador cadastrado no banco de dados.
-                                    <br />
-                                    <span className="text-xs">
-                                        Use as credenciais de ambiente para acessar.
-                                    </span>
-                                </p>
-                            )}
+                            {filteredBookings.map((booking) => <div key={booking.id} className="rounded border bg-white p-3"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="flex items-center gap-2"><p className="font-medium">{booking.title}</p><span className={`rounded-full px-2 py-0.5 text-xs ${booking.status === "cancelled" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{booking.status === "cancelled" ? "Cancelada" : "Confirmada"}</span></div><p className="text-xs text-muted-foreground">{new Date(booking.start_time).toLocaleString("pt-BR")} • {booking.room_name}{booking.creator_name ? ` • ${booking.creator_name}` : ""}</p></div>{booking.status === "cancelled" ? <Button variant="outline" size="sm" disabled>Cancelada</Button> : deletingId === booking.id ? <div className="flex flex-col gap-2 md:flex-row"><Input placeholder="Motivo (opcional)" value={deletionReason} onChange={(e) => setDeletionReason(e.target.value)} className="md:w-56" /><Button variant="destructive" size="sm" onClick={async () => {
+                                const result = await adminDeleteBooking(booking.id, deletionReason || undefined);
+                                if (result.success) { setDeletingId(null); setDeletionReason(""); flash(result.message || "Reserva cancelada."); await loadData(); } else { flash(result.message || "Nao foi possivel cancelar a reserva.", true); }
+                            }}>Confirmar</Button><Button variant="outline" size="sm" onClick={() => { setDeletingId(null); setDeletionReason(""); }}>Voltar</Button></div> : <Button variant="ghost" size="icon" className="text-red-600" onClick={() => setDeletingId(booking.id)}><Trash2 className="h-4 w-4" /></Button>}</div></div>)}
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* Link para página principal */}
-                <div className="mt-8 text-center">
-                    <Link href="/">
-                        <Button variant="outline">Voltar para o Calendário</Button>
-                    </Link>
-                </div>
+                <Card>
+                    <CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" />Admins</CardTitle><CardDescription>Criar e remover usuarios administrativos.</CardDescription></CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label>Email</Label><Input value={userEmail} onChange={(e) => setUserEmail(e.target.value)} /></div><div className="space-y-2"><Label>Nome</Label><Input value={userFullName} onChange={(e) => setUserFullName(e.target.value)} /></div></div>
+                        <div className="grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label>Senha</Label><Input type="password" value={userPassword} onChange={(e) => setUserPassword(e.target.value)} /></div><div className="space-y-2"><Label>Perfil</Label><Select value={userRole} onValueChange={(value) => setUserRole(value as "ADMIN" | "SUPERADMIN")}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="SUPERADMIN">Super Admin</SelectItem></SelectContent></Select></div></div>
+                        <Button onClick={async () => {
+                            const result = await createAdminUser({ email: userEmail, fullName: userFullName, password: userPassword, role: userRole });
+                            if (result.success) { setUserEmail(""); setUserFullName(""); setUserPassword(""); setUserRole("ADMIN"); flash(result.message); await loadData(); } else { flash(result.message, true); }
+                        }}>Criar Admin</Button>
+                        <div className="space-y-2">{admins.map((admin) => <div key={admin.id} className="flex items-center justify-between rounded border bg-white p-3"><div><p className="font-medium">{admin.fullName}</p><p className="text-xs text-muted-foreground">{admin.email} • {admin.role}</p></div><Button variant="ghost" size="icon" className="text-red-600" onClick={async () => {
+                            if (!confirm(`Excluir ${admin.fullName}?`)) return;
+                            const result = await deleteAdminUser(admin.id);
+                            if (result.success) { flash(result.message); await loadData(); } else { flash(result.message, true); }
+                        }}><Trash2 className="h-4 w-4" /></Button></div>)}</div>
+                    </CardContent>
+                </Card>
+
+                <div className="text-center"><Link href="/"><Button variant="outline">Voltar para o calendario</Button></Link></div>
             </main>
         </div>
     );

@@ -1,16 +1,16 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { sendBookingConfirmationEmail } from "./email-actions";
 
-// Schema de validação server-side com Zod
 const bookingSchema = z.object({
-    roomId: z.string().uuid("ID da sala inválido"),
+    roomId: z.string().uuid("ID da sala invalido"),
     creatorName: z.string().min(3, "Nome deve ter pelo menos 3 caracteres"),
     creatorEmail: z
         .string()
-        .email("E-mail inválido")
+        .email("E-mail invalido")
         .transform((email) => email.toLowerCase().trim())
         .refine(
             (email) => {
@@ -19,16 +19,16 @@ const bookingSchema = z.object({
                 return email.endsWith(`@${allowedDomain.toLowerCase()}`);
             },
             {
-                message: `Apenas e-mails corporativos são permitidos`,
+                message: "Apenas e-mails corporativos sao permitidos",
             }
         ),
     title: z
         .string()
-        .min(3, "Título deve ter pelo menos 3 caracteres")
-        .max(100, "Título deve ter no máximo 100 caracteres"),
-    description: z.string().max(500, "Descrição deve ter no máximo 500 caracteres").optional(),
-    startTime: z.string().datetime("Data/hora de início inválida"),
-    endTime: z.string().datetime("Data/hora de término inválida"),
+        .min(3, "Titulo deve ter pelo menos 3 caracteres")
+        .max(100, "Titulo deve ter no maximo 100 caracteres"),
+    description: z.string().max(500, "Descricao deve ter no maximo 500 caracteres").optional(),
+    startTime: z.string().datetime("Data/hora de inicio invalida"),
+    endTime: z.string().datetime("Data/hora de termino invalida"),
     isRecurring: z.boolean().optional().default(false),
     recurrenceType: z.enum(["daily", "weekly", "monthly", "custom"]).optional().nullable(),
     recurrenceEndDate: z.string().datetime().optional().nullable(),
@@ -48,16 +48,18 @@ export type BookingResult = {
     bookingId?: string;
 };
 
-/**
- * Verifica se há conflito de horário para uma reserva
- */
+type CountBookings = (
+    args: Parameters<typeof prisma.booking.count>[0]
+) => ReturnType<typeof prisma.booking.count>;
+
 async function checkAvailability(
+    countBookings: CountBookings,
     roomId: string,
     startTime: Date,
     endTime: Date,
     excludeBookingId?: string
 ): Promise<boolean> {
-    const conflictCount = await prisma.booking.count({
+    const conflictCount = await countBookings({
         where: {
             roomId,
             status: "CONFIRMED",
@@ -72,24 +74,137 @@ async function checkAvailability(
     return conflictCount === 0;
 }
 
-/**
- * Server Action para criar uma reserva
- */
+function buildRecurringOccurrences(
+    recurringDates: Date[],
+    startDateTime: Date,
+    durationMs: number
+) {
+    return recurringDates.map((date) => {
+        const occurrenceStart = new Date(date);
+        occurrenceStart.setHours(startDateTime.getHours(), startDateTime.getMinutes(), 0, 0);
+
+        return {
+            startTime: occurrenceStart,
+            endTime: new Date(occurrenceStart.getTime() + durationMs),
+        };
+    });
+}
+
+async function createBookingWithRetry(
+    data: BookingInput,
+    startDateTime: Date,
+    endDateTime: Date,
+    recurringDates: Date[]
+) {
+    const durationMs = endDateTime.getTime() - startDateTime.getTime();
+    const recurringOccurrences = buildRecurringOccurrences(recurringDates, startDateTime, durationMs);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            return await prisma.$transaction(
+                async (tx) => {
+                    const countBookings = tx.booking.count.bind(tx.booking) as CountBookings;
+
+                    const isAvailable = await checkAvailability(
+                        countBookings,
+                        data.roomId,
+                        startDateTime,
+                        endDateTime
+                    );
+
+                    if (!isAvailable) {
+                        throw new Error("Este horario ja esta reservado. Por favor, escolha outro horario.");
+                    }
+
+                    for (const occurrence of recurringOccurrences) {
+                        const isOccurrenceAvailable = await checkAvailability(
+                            countBookings,
+                            data.roomId,
+                            occurrence.startTime,
+                            occurrence.endTime
+                        );
+
+                        if (!isOccurrenceAvailable) {
+                            throw new Error(
+                                `Conflito de horario na recorrencia em ${occurrence.startTime.toLocaleDateString("pt-BR")}.`
+                            );
+                        }
+                    }
+
+                    const booking = await tx.booking.create({
+                        data: {
+                            roomId: data.roomId,
+                            userId: null,
+                            creatorName: data.creatorName,
+                            creatorEmail: data.creatorEmail,
+                            title: data.title,
+                            description: data.description || null,
+                            startTime: startDateTime,
+                            endTime: endDateTime,
+                            isRecurring: data.isRecurring || false,
+                            recurrenceType: data.recurrenceType || null,
+                            status: "CONFIRMED",
+                        },
+                        include: {
+                            room: {
+                                select: { name: true },
+                            },
+                        },
+                    });
+
+                    if (recurringOccurrences.length > 0) {
+                        await tx.booking.createMany({
+                            data: recurringOccurrences.map((occurrence) => ({
+                                roomId: data.roomId,
+                                userId: null,
+                                creatorName: data.creatorName,
+                                creatorEmail: data.creatorEmail,
+                                title: data.title,
+                                description: data.description || null,
+                                startTime: occurrence.startTime,
+                                endTime: occurrence.endTime,
+                                isRecurring: true,
+                                recurrenceType: data.recurrenceType || null,
+                                parentBookingId: booking.id,
+                                status: "CONFIRMED",
+                            })),
+                        });
+                    }
+
+                    return booking;
+                },
+                {
+                    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+                }
+            );
+        } catch (error) {
+            if (
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === "P2034" &&
+                attempt === 0
+            ) {
+                continue;
+            }
+
+            throw error;
+        }
+    }
+
+    throw new Error("Nao foi possivel confirmar a disponibilidade da sala.");
+}
+
 export async function createBooking(input: BookingInput): Promise<BookingResult> {
-    // 1. Validar dados com Zod
     const parseResult = bookingSchema.safeParse(input);
 
     if (!parseResult.success) {
         const firstError = parseResult.error.errors[0];
         return {
             success: false,
-            message: firstError?.message || "Dados inválidos",
+            message: firstError?.message || "Dados invalidos",
         };
     }
 
     const data = parseResult.data;
-
-    // 2. Validações adicionais de negócio
     const startDateTime = new Date(data.startTime);
     const endDateTime = new Date(data.endTime);
     const now = new Date();
@@ -97,14 +212,14 @@ export async function createBooking(input: BookingInput): Promise<BookingResult>
     if (startDateTime < now) {
         return {
             success: false,
-            message: "Não é possível criar reservas no passado.",
+            message: "Nao e possivel criar reservas no passado.",
         };
     }
 
     if (endDateTime <= startDateTime) {
         return {
             success: false,
-            message: "O horário de término deve ser após o horário de início.",
+            message: "O horario de termino deve ser apos o horario de inicio.",
         };
     }
 
@@ -112,131 +227,46 @@ export async function createBooking(input: BookingInput): Promise<BookingResult>
     if (durationHours > 8) {
         return {
             success: false,
-            message: "A duração máxima de uma reserva é 8 horas.",
+            message: "A duracao maxima de uma reserva e 8 horas.",
         };
     }
 
-    // 3. Verificar disponibilidade (da primeira reserva)
-    const isAvailable = await checkAvailability(data.roomId, startDateTime, endDateTime);
-    if (!isAvailable) {
+    if (data.recurrenceEndDate && new Date(data.recurrenceEndDate) < startDateTime) {
         return {
             success: false,
-            message: "Este horário já está reservado. Por favor, escolha outro horário.",
+            message: "A data final da recorrencia deve ser posterior ao inicio da reserva.",
         };
     }
 
-    // Se for recorrente, gerar datas futuras e verificar conflitos
     let recurringDates: Date[] = [];
     if (data.isRecurring && data.recurrenceType) {
         const { generateRecurringDates } = await import("@/lib/utils");
 
-        // Configurações para geração
-        const recurrenceOptions = {
-            endDate: data.recurrenceEndDate ? new Date(data.recurrenceEndDate) : undefined,
-            daysOfWeek: data.selectedDaysOfWeek,
-            monthlyPattern: data.monthlyPattern || undefined,
-            weeklyDayOfWeek: data.weeklyDayOfWeek ?? undefined,
-            monthlyDay: data.monthlyDay ?? undefined,
-            monthlyWeekdayOccurrence: data.monthlyWeekdayOccurrence ?? undefined,
-            monthlyWeekdayNumber: data.monthlyWeekdayNumber ?? undefined,
-        };
-
         recurringDates = generateRecurringDates(
             startDateTime,
-            data.recurrenceType as any,
-            recurrenceOptions
+            data.recurrenceType,
+            {
+                endDate: data.recurrenceEndDate ? new Date(data.recurrenceEndDate) : undefined,
+                daysOfWeek: data.selectedDaysOfWeek,
+                monthlyPattern: data.monthlyPattern || undefined,
+                weeklyDayOfWeek: data.weeklyDayOfWeek ?? undefined,
+                monthlyDay: data.monthlyDay ?? undefined,
+                monthlyWeekdayOccurrence: data.monthlyWeekdayOccurrence ?? undefined,
+                monthlyWeekdayNumber: data.monthlyWeekdayNumber ?? undefined,
+            }
         );
 
-        // Limite de segurança (ex: máximo 50 ocorrências para evitar abuso)
         if (recurringDates.length > 50) {
             return {
                 success: false,
-                message: "O período selecionado gera muitas ocorrências (limite: 50). Reduza o intervalo.",
+                message: "O periodo selecionado gera muitas ocorrencias (limite: 50). Reduza o intervalo.",
             };
-        }
-
-        // Verificar disponibilidade para CADA ocorrência futura
-        // Isso pode ser otimizado, mas para segurança vamos verificar uma a uma por enquanto
-        const durationMs = endDateTime.getTime() - startDateTime.getTime();
-
-        for (const date of recurringDates) {
-            const occurrenceStart = new Date(date);
-            // Ajusta o horário para bater com o horário da reserva original
-            occurrenceStart.setHours(startDateTime.getHours(), startDateTime.getMinutes(), 0, 0);
-
-            const occurrenceEnd = new Date(occurrenceStart.getTime() + durationMs);
-
-            const isOccurrenceAvailable = await checkAvailability(data.roomId, occurrenceStart, occurrenceEnd);
-            if (!isOccurrenceAvailable) {
-                return {
-                    success: false,
-                    message: `Conflito de horário na recorrência em ${occurrenceStart.toLocaleDateString('pt-BR')}.`,
-                };
-            }
         }
     }
 
     try {
-        // 4. Criar reserva principal
-        const booking = await prisma.booking.create({
-            data: {
-                roomId: data.roomId,
-                userId: null, // Reserva anônima (visitante)
-                creatorName: data.creatorName,
-                creatorEmail: data.creatorEmail,
-                title: data.title,
-                description: data.description || null,
-                startTime: startDateTime,
-                endTime: endDateTime,
-                isRecurring: data.isRecurring || false,
-                recurrenceType: data.recurrenceType || null,
-                status: "CONFIRMED",
-            },
-            include: {
-                room: {
-                    select: { name: true },
-                },
-            },
-        });
+        const booking = await createBookingWithRetry(data, startDateTime, endDateTime, recurringDates);
 
-        // 4.1 Criar reservas filhas (recorrência)
-        if (recurringDates.length > 0) {
-            const durationMs = endDateTime.getTime() - startDateTime.getTime();
-
-            // Prepara dados para createMany
-            const recurringBookingsData = recurringDates.map(date => {
-                const occurrenceStart = new Date(date);
-                occurrenceStart.setHours(startDateTime.getHours(), startDateTime.getMinutes(), 0, 0);
-                const occurrenceEnd = new Date(occurrenceStart.getTime() + durationMs);
-
-                return {
-                    roomId: data.roomId,
-                    userId: null,
-                    creatorName: data.creatorName,
-                    creatorEmail: data.creatorEmail,
-                    title: data.title,
-                    description: data.description || null,
-                    startTime: occurrenceStart,
-                    endTime: occurrenceEnd,
-                    isRecurring: true,
-                    recurrenceType: data.recurrenceType || null,
-                    parentId: booking.id, // Assumindo que esquema suporta parentId, se não, deixamos independentes ou adicionamos campo depois
-                    status: "CONFIRMED",
-                };
-            });
-
-            // Nota: Se o schema não tiver parentId, a relação não será explícita.
-            // Verificando schema anteriormente... Booking tem parentId?
-            // Vamos assumir que não tem e criar como independentes por enquanto, ou verificar schema.
-            // O TASK não pediu alteração de schema, mas seria bom.
-            // Por simplicidade e robustez com o schema atual (que não vi parentId), criamos independentes.
-
-            await prisma.booking.createMany({
-                data: recurringBookingsData as any, // Cast para evitar erro de tipo estrito se campos divergirem levemente
-            });
-        }
-
-        // 5. Enviar e-mail de confirmação em background
         sendBookingConfirmationEmail({
             to: data.creatorEmail,
             bookingId: booking.id,
@@ -245,29 +275,26 @@ export async function createBooking(input: BookingInput): Promise<BookingResult>
             startTime: data.startTime,
             endTime: data.endTime,
             creatorName: data.creatorName,
-        }).catch((err) => {
-            console.error("Falha ao enviar email de confirmação:", err);
+        }).catch((error) => {
+            console.error("Falha ao enviar email de confirmacao:", error);
         });
 
         return {
             success: true,
             bookingId: booking.id,
             message: recurringDates.length > 0
-                ? `Reserva criada com sucesso! (+${recurringDates.length} recorrências)`
+                ? `Reserva criada com sucesso! (+${recurringDates.length} recorrencias)`
                 : "Reserva criada com sucesso!",
         };
-    } catch (err) {
-        console.error("Unexpected error creating booking:", err);
+    } catch (error) {
+        console.error("Unexpected error creating booking:", error);
         return {
             success: false,
-            message: "Erro inesperado ao criar reserva.",
+            message: error instanceof Error ? error.message : "Erro inesperado ao criar reserva.",
         };
     }
 }
 
-/**
- * Busca reservas para exibição no calendário
- */
 export async function getBookingsForCalendar(
     startDate: Date,
     endDate: Date,
@@ -321,9 +348,6 @@ export async function getBookingsForCalendar(
     }));
 }
 
-/**
- * Busca branches (filiais) ativas
- */
 export async function getBranches() {
     return prisma.branch.findMany({
         where: { isActive: true },
@@ -331,9 +355,6 @@ export async function getBranches() {
     });
 }
 
-/**
- * Busca rooms (salas) de uma filial
- */
 export async function getRoomsByBranch(branchId: string) {
     return prisma.room.findMany({
         where: {

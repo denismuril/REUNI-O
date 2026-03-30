@@ -35,4 +35,26 @@ export async function isSuperAdmin() {
     return role === 'SUPERADMIN';
 }
 
+export async function requireAdmin() {
+    const session = await getSession();
+    const role = session?.user?.role;
+
+    if (!session?.user || (role !== 'ADMIN' && role !== 'SUPERADMIN')) {
+        throw new Error('Acesso negado.');
+    }
+
+    return session.user;
+}
+
+export async function requireSuperAdmin() {
+    const session = await getSession();
+    const role = session?.user?.role;
+
+    if (!session?.user || role !== 'SUPERADMIN') {
+        throw new Error('Acesso negado. Somente superadmins podem executar esta acao.');
+    }
+
+    return session.user;
+}
+
 export { authOptions };
