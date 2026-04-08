@@ -35,11 +35,12 @@ export async function sendBookingConfirmationEmail(data: SendBookingEmailProps) 
         const dateFormatted = startDate.toLocaleDateString("pt-BR", {
             weekday: 'long',
             day: 'numeric',
-            month: 'long'
+            month: 'long',
+            timeZone: 'America/Sao_Paulo'
         });
 
-        const timeStartFormatted = startDate.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' });
-        const timeEndFormatted = endDate.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit' });
+        const timeStartFormatted = startDate.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+        const timeEndFormatted = endDate.toLocaleTimeString("pt-BR", { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
 
         const html = getBookingConfirmationTemplate({
             title: data.title,
@@ -83,7 +84,8 @@ export async function sendBookingCancellationEmail(data: SendBookingEmailProps) 
             day: 'numeric',
             month: 'long',
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
+            timeZone: 'America/Sao_Paulo'
         });
 
         const html = getBookingCancellationTemplate({

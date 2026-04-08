@@ -55,9 +55,9 @@ export async function GET(request: Request) {
                 const html = getBookingReminderTemplate({
                     title: booking.title,
                     roomName: booking.room.name,
-                    date: booking.startTime.toLocaleDateString("pt-BR"),
-                    startTime: booking.startTime.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-                    endTime: booking.endTime.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+                    date: booking.startTime.toLocaleDateString("pt-BR", { timeZone: 'America/Sao_Paulo' }),
+                    startTime: booking.startTime.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: 'America/Sao_Paulo' }),
+                    endTime: booking.endTime.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: 'America/Sao_Paulo' }),
                     creatorName: booking.creatorName,
                 });
 
