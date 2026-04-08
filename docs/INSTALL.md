@@ -14,7 +14,7 @@ Este guia explica como configurar o ambiente de desenvolvimento local.
 ## 1. Clone do Repositório
 
 ```bash
-git clone https://github.com/seu-usuario/REUNI-O.git
+git clone https://github.com/denismuril/REUNI-O.git
 cd REUNI-O
 ```
 
@@ -64,9 +64,11 @@ npx prisma migrate dev --name init
 4. Copie a chave → `RESEND_API_KEY`
 5. Verifique um domínio em **Domains** (ou use `onboarding@resend.dev` para testes)
 
+> **Nota:** Sem `RESEND_API_KEY`, o sistema funciona normalmente mas os emails de confirmação, cancelamento e lembrete não são enviados.
+
 ## 5. Variáveis de Ambiente
 
-Crie um arquivo `.env.local` na raiz do projeto:
+Crie um arquivo `.env.local` na raiz do projeto (use `.env.example` como referência):
 
 ```env
 # Banco de Dados
@@ -74,19 +76,19 @@ DATABASE_URL="mysql://user:password@host:3306/database"
 
 # NextAuth
 NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_URL_INTERNAL=http://127.0.0.1:3000
 NEXTAUTH_SECRET=gere_uma_chave_com_openssl_rand_base64_32
-
-# Admin (Fallback - usado até criar primeiro admin no banco)
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=sua_senha_admin_segura
-
-# Resend (Email)
-RESEND_API_KEY=re_xxxxxxxxxxxx
-EMAIL_FROM=reservas@seudominio.com.br
-ALLOWED_EMAIL_DOMAIN=seudominio.com.br
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+PORT=3000
+
+# Resend (Email)
+RESEND_API_KEY=re_xxxxxxxxxxxx
+ALLOWED_EMAIL_DOMAIN=seudominio.com.br
+
+# Cron Jobs (opcional)
+CRON_SECRET=seu_segredo_cron_aqui
 ```
 
 ### Gerar NEXTAUTH_SECRET
@@ -94,6 +96,31 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```bash
 openssl rand -base64 32
 ```
+
+### Criar Primeiro Usuário Admin
+
+O sistema não possui um usuário admin padrão. Para o primeiro acesso ao painel `/admin`, insira um registro diretamente no banco:
+
+```sql
+INSERT INTO reunio_users (id, email, password, full_name, role, created_at, updated_at)
+VALUES (
+    UUID(),
+    'admin@seudominio.com.br',
+    '$2a$12$...',   -- hash bcrypt da senha desejada
+    'Administrador',
+    'SUPERADMIN',
+    NOW(),
+    NOW()
+);
+```
+
+Ou utilize o Prisma Studio:
+
+```bash
+npx prisma studio
+```
+
+Depois, crie novos admins diretamente pelo painel `/admin`.
 
 ## 6. Executar em Desenvolvimento
 
@@ -115,12 +142,13 @@ npm start
 | Comando | Descrição |
 |---------|-----------|
 | `npm run dev` | Servidor de desenvolvimento |
-| `npm run build` | Build de produção |
+| `npm run build` | Build de produção (inclui `prisma generate`) |
 | `npm start` | Iniciar produção |
 | `npm run lint` | Verificar código |
-| `npx prisma studio` | Interface visual do banco |
-| `npx prisma db push` | Sincronizar schema |
-| `npx prisma generate` | Regenerar cliente |
+| `npm run db:push` | Sincronizar schema com banco |
+| `npm run db:migrate` | Criar migração de desenvolvimento |
+| `npm run db:generate` | Regenerar cliente Prisma |
+| `npm run db:studio` | Interface visual do banco (Prisma Studio) |
 
 ## Solução de Problemas
 
@@ -148,4 +176,5 @@ npm install
 
 1. Verifique se `NEXTAUTH_SECRET` está configurado
 2. Confirme que `NEXTAUTH_URL` corresponde à URL de acesso
-3. Reinicie o servidor após alterar variáveis
+3. Em produção com Nginx, configure `NEXTAUTH_URL_INTERNAL=http://127.0.0.1:3000`
+4. Reinicie o servidor após alterar variáveis
