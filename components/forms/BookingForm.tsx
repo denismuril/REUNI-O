@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -30,7 +30,7 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 
-import { BUSINESS_HOURS } from "@/types/booking";
+import { BUSINESS_HOURS, SLOT_DURATION_MINUTES } from "@/types/booking";
 import { combineDateAndTime } from "@/lib/utils";
 import { createBooking, getBranches, getRoomsByBranch } from "@/app/actions/booking";
 
@@ -166,14 +166,37 @@ interface BookingFormProps {
 }
 
 // Gera opções de horário
-function generateTimeOptions(): { value: string; label: string }[] {
+// Se selectedDate for hoje, filtra horários que já passaram há mais de SLOT_DURATION_MINUTES
+// Isso garante que, às 16:01, o slot das 16:00 ainda apareça (pois a reunião ainda pode
+// ser registrada retroativamente ou começar em seguida).
+function generateTimeOptions(selectedDate?: Date): { value: string; label: string }[] {
     const options: { value: string; label: string }[] = [];
+
+    // Verifica se a data selecionada é hoje
+    const today = new Date();
+    const isToday =
+        selectedDate &&
+        selectedDate.getFullYear() === today.getFullYear() &&
+        selectedDate.getMonth() === today.getMonth() &&
+        selectedDate.getDate() === today.getDate();
+
+    // Horário mínimo: slot atual arredondado para baixo (ex: 16:01 → 16:00)
+    // Subtraímos SLOT_DURATION_MINUTES para não bloquear o slot imediatamente anterior
+    const minTotalMinutes = isToday
+        ? today.getHours() * 60 + today.getMinutes() - SLOT_DURATION_MINUTES
+        : -Infinity;
+
     for (let hour = BUSINESS_HOURS.start; hour <= BUSINESS_HOURS.end; hour++) {
-        options.push({
-            value: `${hour.toString().padStart(2, "0")}:00`,
-            label: `${hour.toString().padStart(2, "0")}:00`,
-        });
-        if (hour < BUSINESS_HOURS.end) {
+        const slot00Minutes = hour * 60;
+        const slot30Minutes = hour * 60 + 30;
+
+        if (slot00Minutes >= minTotalMinutes) {
+            options.push({
+                value: `${hour.toString().padStart(2, "0")}:00`,
+                label: `${hour.toString().padStart(2, "0")}:00`,
+            });
+        }
+        if (hour < BUSINESS_HOURS.end && slot30Minutes >= minTotalMinutes) {
             options.push({
                 value: `${hour.toString().padStart(2, "0")}:30`,
                 label: `${hour.toString().padStart(2, "0")}:30`,
@@ -194,8 +217,6 @@ export function BookingForm({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-    const timeOptions = generateTimeOptions();
 
     const {
         register,
@@ -231,6 +252,10 @@ export function BookingForm({
     const selectedStartTime = watch("startTime");
     const selectedDate = watch("date");
     const selectedMonthlyPattern = watch("monthlyPattern");
+
+    // Recalcula os slots de horário quando a data selecionada muda
+    // Se for hoje: exibe a partir do slot anterior ao atual (ex: às 16:01 ainda mostra 16:00)
+    const timeOptions = useMemo(() => generateTimeOptions(selectedDate), [selectedDate]);
 
     // Carrega filiais ao montar o componente via server action
     useEffect(() => {
