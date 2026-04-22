@@ -143,8 +143,8 @@ export interface EmailNotificationPayload {
 // ============================================================
 
 export const BUSINESS_HOURS = {
-    start: 0, // 00:00
-    end: 24, // 24:00 (end of day)
+    start: 6, // 06:00
+    end: 20, // 20:00
 } as const;
 
 export const SLOT_DURATION_MINUTES = 30;
