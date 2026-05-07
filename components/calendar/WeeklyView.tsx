@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useRef, useEffect } from "react";
 import {
     addDays,
     startOfWeek,
@@ -41,11 +41,31 @@ export function WeeklyView({
     onSlotClick,
     isLoading = false,
 }: WeeklyViewProps) {
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+
     // Gera os dias da semana (Segunda a Sexta)
     const weekDays = useMemo(() => {
         const start = startOfWeek(currentDate, { weekStartsOn: 1 }); // Segunda-feira
         return Array.from({ length: 5 }, (_, i) => addDays(start, i));
     }, [currentDate]);
+
+    // Auto-scroll para o horário atual ao montar o componente
+    useEffect(() => {
+        if (scrollContainerRef.current) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+
+            // Calcula posição em pixels: (minutos desde o início do expediente / 30min) * altura do slot
+            const minutesFromStart = (currentHour - BUSINESS_HOURS.start) * 60 + currentMinute;
+
+            if (minutesFromStart > 0) {
+                // Posiciona 1 hora antes do horário atual para dar contexto
+                const scrollTarget = Math.max(0, ((minutesFromStart - 60) / 30) * SLOT_HEIGHT);
+                scrollContainerRef.current.scrollTop = scrollTarget;
+            }
+        }
+    }, []);
 
     // Gera os time slots
     const timeSlots = useMemo(() => generateTimeSlots(), []);
@@ -97,7 +117,7 @@ export function WeeklyView({
             </div>
 
             {/* Grid do calendário */}
-            <div className="flex-1 overflow-auto relative">
+            <div ref={scrollContainerRef} className="flex-1 overflow-auto relative">
                 {/* Cabeçalho dos dias - Movido para dentro do scroll para alinhar com o corpo e scrollbar */}
                 <div className="flex border-b sticky top-0 bg-background z-20 min-w-fit shadow-sm">
                     <div

@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useRef, useEffect } from "react";
 import { format, isToday, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import {
     CalendarEvent,
+    BUSINESS_HOURS,
     generateTimeSlots,
     WEEKDAYS,
 } from "@/types/booking";
@@ -35,8 +36,28 @@ export function DailyView({
     onViewChange,
     isLoading = false,
 }: DailyViewProps) {
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+
     // Gera os time slots
     const timeSlots = useMemo(() => generateTimeSlots(), []);
+
+    // Auto-scroll para o horário atual ao montar o componente
+    useEffect(() => {
+        if (scrollContainerRef.current) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+
+            // Calcula posição em pixels: (minutos desde o início do expediente / 30min) * altura do slot
+            const minutesFromStart = (currentHour - BUSINESS_HOURS.start) * 60 + currentMinute;
+
+            if (minutesFromStart > 0) {
+                // Posiciona 1 hora antes do horário atual para dar contexto
+                const scrollTarget = Math.max(0, ((minutesFromStart - 60) / 30) * SLOT_HEIGHT);
+                scrollContainerRef.current.scrollTop = scrollTarget;
+            }
+        }
+    }, []);
 
     // Filtra eventos do dia atual
     const dayEvents = useMemo(() => {
@@ -106,7 +127,7 @@ export function DailyView({
             </div>
 
             {/* Grid do calendário */}
-            <div className="flex-1 overflow-auto">
+            <div ref={scrollContainerRef} className="flex-1 overflow-auto">
                 <div className="flex min-h-full">
                     {/* Coluna de horários */}
                     <div
